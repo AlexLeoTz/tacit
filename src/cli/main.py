@@ -256,8 +256,8 @@ def recent(
 def export(
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory for markdown files"),
     preview: bool = typer.Option(False, "--preview", help="Launch live preview server after exporting"),
-    port: int = typer.Option(8080, "--port", help="Port for preview HTTP server if --preview is set"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server"),
+    port: int = typer.Option(4000, "--port", help="Port for preview HTTP server if --preview is set"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Export stored memories to categorized Markdown files and generate INDEX.md."""
@@ -297,8 +297,8 @@ def export(
 
 @app.command()
 def serve(
-    port: int = typer.Option(8080, "--port", help="Port for preview HTTP server"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to port+1 or next available)"),
+    port: int = typer.Option(4000, "--port", help="Port for preview HTTP server"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
@@ -312,8 +312,8 @@ def serve(
 
 @app.command(name="dashboard")
 def dashboard(
-    port: int = typer.Option(8080, "--port", help="Port for preview and dashboard server"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to port+1 or next available)"),
+    port: int = typer.Option(4000, "--port", help="Port for preview and dashboard server"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
     open_browser: bool = typer.Option(False, "--open", help="Automatically open dashboard in default browser"),

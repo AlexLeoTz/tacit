@@ -21,7 +21,7 @@ from .templates import HTML_PREVIEW_TEMPLATE
 class MarkdownPreviewServer:
     """Real-time markdown preview and dashboard server with multi-project & WebSocket live-reload."""
 
-    def __init__(self, storage: MemoryStorage, export_dir: Path, port: int = 8080, ws_port: Optional[int] = None):
+    def __init__(self, storage: MemoryStorage, export_dir: Path, port: int = 4000, ws_port: Optional[int] = None):
         self.storage = storage
         self.export_dir = Path(export_dir)
         self.port = port

@@ -258,19 +258,19 @@ pmc clear
 PMC includes a real-time web dashboard with live WebSocket reload, theme switcher (Light, Dark, System), full-text search, type filtering, and markdown rendering.
 
 ```bash
-# 1. Start live preview server (defaults to HTTP: 8080, WebSocket: 8081 or next available)
+# 1. Start live preview server (defaults to HTTP: 4000, WebSocket: 4001 or next available)
 pmc serve
 
-# 2. Specify custom ports for both HTTP and WebSocket (e.g. to avoid conflict with React Native / Expo on 8081)
+# 2. Specify custom ports for both HTTP and WebSocket
 pmc serve --port 3000 --ws-port 3001
 
 # 3. Export to Markdown files and launch live preview immediately with custom ports
 pmc export --preview --port 3000 --ws-port 3001
 ```
 
-> **Automatic Port Conflict Resolution**: If a port is already taken (e.g. port `8081` by Expo Metro Bundler), PMC automatically scans and binds to the next available free port without crashing.
+> **Automatic Port Conflict Resolution**: If a port is already taken, PMC automatically scans and binds to the next available free port without crashing.
 
-Open your browser at `http://localhost:3000` (or your configured port) to interact with your project memories visually.
+Open your browser at `http://localhost:4000` (or your configured port) to interact with your project memories visually.
 
 ---
 

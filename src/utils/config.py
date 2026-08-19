@@ -16,7 +16,8 @@ class Config:
     DEFAULT_EXPORT_DIR_NAME = "memory-export"
     REGISTRY_FILE: Path = Path.home() / ".gemini" / "config" / "pmc_projects.json"
 
-    PREVIEW_PORT: int = int(os.getenv("PREVIEW_PORT", "8080"))
+    PREVIEW_PORT: int = int(os.getenv("PREVIEW_PORT", "4000"))
+    PREVIEW_WS_PORT: int = int(os.getenv("PREVIEW_WS_PORT", "4001"))
     MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio")
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "50"))
     DUAL_WRITE: bool = os.getenv("PMC_DUAL_WRITE", "true").lower() in ("true", "1", "yes")
