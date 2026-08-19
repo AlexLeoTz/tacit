@@ -73,12 +73,12 @@ Whenever you make key architectural decisions, discover bugs, fix tricky errors,
 
     console.print(
         Panel.fit(
-            f"[bold green]🧠 Project Memory Cortex Initialized[/bold green]\n"
+            f"[bold green]Project Memory Cortex Initialized[/bold green]\n"
             f"[dim]Project Root:[/dim] {target_root.resolve()}\n"
             f"[dim]Storage Dir:[/dim]  {Config.get_memory_dir(target_root).resolve()}\n"
             f"[dim]Database:[/dim]     {db_path.resolve()}\n"
             f"[dim]Total Memories:[/dim] {count}\n"
-            f"[cyan]✨ Auto-created AI agent rules in `.agents/rules/` and `.cursorrules`![/cyan]",
+            f"[cyan]Auto-created AI agent rules in `.agents/rules/` and `.cursorrules`[/cyan]",
             border_style="green",
         )
     )
@@ -122,11 +122,11 @@ def remember(
     success = storage.add_memory(node)
     if success:
         proj_label = f" [cyan]({project})[/cyan]" if project else ""
-        console.print(f"[bold green]✅ Recorded [{node.type.upper()}]:[/bold green]{proj_label} {node.summary}")
+        console.print(f"[bold green]Recorded [{node.type.upper()}]:[/bold green]{proj_label} {node.summary}")
         console.print(f"[dim]ID:[/dim] {node.id}")
         console.print(f"[dim]Content Hash:[/dim] {node.content_hash[:16]}...")
     else:
-        console.print("[bold red]❌ Failed to store memory: duplicate or database integrity error.[/bold red]")
+        console.print("[bold red]Failed to store memory: duplicate or database integrity error.[/bold red]")
 
 
 @app.command()
@@ -259,7 +259,7 @@ def export(
 
     console.print(
         Panel.fit(
-            f"[bold green]✅ Export Complete[/bold green]\n"
+            f"[bold green]Export Complete[/bold green]\n"
             f"[dim]Output Directory:[/dim] {summary.export_directory.resolve()}\n"
             f"[dim]Total Memories:[/dim]   {summary.total_memories}\n"
             f"[dim]Files Created:[/dim]    {summary.total_files}",
@@ -347,16 +347,16 @@ def delete(
     console.print(f"[yellow]Target Memory:[/yellow] [{node.type}] {node.summary} ([dim]{node.id}[/dim])")
 
     if not yes:
-        confirm = typer.confirm("⚠️ Are you sure you want to permanently delete this memory node?")
+        confirm = typer.confirm("Are you sure you want to permanently delete this memory node?")
         if not confirm:
             console.print("[dim]Operation canceled.[/dim]")
             return
 
     deleted = storage.delete_memory(node_id)
     if deleted:
-        console.print(f"[bold green]🗑️ Successfully deleted memory node {node_id}.[/bold green]")
+        console.print(f"[bold green]Successfully deleted memory node {node_id}.[/bold green]")
     else:
-        console.print(f"[bold red]❌ Failed to delete memory node {node_id}.[/bold red]")
+        console.print(f"[bold red]Failed to delete memory node {node_id}.[/bold red]")
 
 
 @app.command()
@@ -373,7 +373,7 @@ def clear(
         console.print(f"[yellow]No memories stored in project '{root.name}'.[/yellow]")
         return
 
-    console.print(f"[bold red]⚠️ WARNING:[/bold red] This will delete all [bold]{count}[/bold] memories from project '[cyan]{root.name}[/cyan]' ({root.resolve()}).")
+    console.print(f"[bold red]WARNING:[/bold red] This will delete all [bold]{count}[/bold] memories from project '[cyan]{root.name}[/cyan]' ({root.resolve()}).")
 
     if not yes:
         confirm = typer.confirm("Are you ABSOLUTELY sure you want to delete all project memories?")
@@ -382,7 +382,7 @@ def clear(
             return
 
     cleared = storage.clear_all_memories()
-    console.print(f"[bold green]🗑️ Cleared {cleared} memories from project storage.[/bold green]")
+    console.print(f"[bold green]Cleared {cleared} memories from project storage.[/bold green]")
 
 
 @app.command()
@@ -451,7 +451,7 @@ def install_mcp(
         config_path.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
 
         console.print(Panel.fit(
-            f"[bold green]✅ MCP Server Configured Successfully![/bold green]\n"
+            f"[bold green]MCP Server Configured Successfully[/bold green]\n"
             f"[dim]Client:[/dim]  {client.capitalize()}\n"
             f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
             f"[cyan]The 'pmc mcp' server is now globally registered for all projects.[/cyan]",
@@ -465,4 +465,5 @@ def install_mcp(
 
 if __name__ == "__main__":
     app()
+
 

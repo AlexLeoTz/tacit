@@ -1,4 +1,4 @@
-# 🧠 Project Memory Cortex (PMC)
+# Project Memory Cortex (PMC)
 *(Suggested Brand Names: **Engram**, **CortexFlow**, **RecallAI**, **SynapseDAG**)*
 
 > **Persistent, immutable, timestamped institutional memory for AI coding agents.**  
@@ -6,17 +6,17 @@
 
 ---
 
-## 🎯 Motivation & The Problem It Solves
+## Motivation and The Problem It Solves
 
 ### The Problem: AI Amnesia in Modern Software Engineering
-Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, OpenCode) possess superhuman reasoning, but suffer from **total project amnesia**:
-1. **Context Window Limits & Compaction Loss**: As conversations grow, context is summarized or wiped. The agent forgets *why* a specific architectural decision was made 20 turns ago.
-2. **Session Resets & Model Switching**: Starting a new chat or switching between models (e.g. Gemini, Claude 3.7, GPT-4o) destroys all working institutional memory.
+Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, OpenCode) possess reasoning capabilities, but suffer from **project amnesia**:
+1. **Context Window Limits & Compaction Loss**: As conversations grow, context is summarized or wiped. The agent forgets why a specific architectural decision was made 20 turns ago.
+2. **Session Resets & Model Switching**: Starting a new chat or switching between models (e.g. Gemini, Claude 3.7, GPT-4o) destroys working institutional memory.
 3. **Repeated Mistakes & Bug Regressions**: Agents often re-introduce the same bugs, test the same failed hypotheses, or undo undocumented workarounds ("hacks") previously resolved by another session or teammate.
 4. **Scattered Tacit Knowledge**: Critical deployment commands, environment quirks, and architectural caveats live only in chat histories rather than in an indexed, verifiable repository.
 
 ### What is Project Memory Cortex?
-**Project Memory Cortex** is a content-addressed, cryptographic **institutional memory layer** for AI software engineers. It runs locally as a Model Context Protocol (MCP) server and embeds seamlessly into your existing developer workflow:
+**Project Memory Cortex** is a content-addressed, cryptographic **institutional memory layer** for AI software engineers. It runs locally as a Model Context Protocol (MCP) server and embeds into your existing developer workflow:
 - **Immutable Knowledge DAG**: Every architectural decision, setup command, hack, error fix, and design constraint is stored with a cryptographic SHA-256 hash and Merkle root.
 - **Fast Full-Text Retrieval (FTS5 + BM25)**: Agents instantly recall relevant decisions using natural language search.
 - **Bootstrapping on Session Start**: Agents automatically query past context on session startup (`memory_context`) to immediately align with historical design decisions.
@@ -24,7 +24,7 @@ Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, Ope
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
@@ -55,26 +55,26 @@ Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, Ope
 
 ---
 
-## 📑 Table of Contents
-1. [Installation](#-1-installation)
-2. [AI Agent Integration (MCP Setup)](#-2-ai-agent-integration-mcp-setup)
-3. [Agent Master Prompt / Rules](#-3-agent-master-prompt--rules-automated)
-4. [CLI Usage & Commands](#-4-cli-usage--commands)
-5. [Live Markdown Preview Server](#-5-live-markdown-preview-server)
-6. [MCP Tools Reference](#-6-mcp-tools-reference)
-7. [Multi-Project Support](#-7-multi-project-support)
-8. [Testing](#-8-testing)
+## Table of Contents
+1. [Installation](#1-installation)
+2. [AI Agent Integration (MCP Setup)](#2-ai-agent-integration-mcp-setup)
+3. [Agent Master Prompt & Rules](#3-agent-master-prompt--rules-automated)
+4. [CLI Usage & Commands](#4-cli-usage--commands)
+5. [Live Markdown Preview Server](#5-live-markdown-preview-server)
+6. [MCP Tools Reference](#6-mcp-tools-reference)
+7. [Multi-Project Support](#7-multi-project-support)
+8. [Testing](#8-testing)
 
 ---
 
-## 📦 1. Installation
+## 1. Installation
 
 Install the package globally in your Python environment:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/project-memory.git
-cd project-memory
+git clone https://github.com/AlexLeoTz/project-memory-cortext.git
+cd project-memory-cortext
 
 # Install globally on your machine (editable mode for active development)
 pip install -e .
@@ -84,7 +84,7 @@ After installation, the **`pmc`** and **`project-memory`** CLI commands will be 
 
 ---
 
-## 🤖 2. AI Agent Integration (MCP Setup)
+## 2. AI Agent Integration (MCP Setup)
 
 Project Memory Cortex runs as a local MCP server that automatically detects whichever project directory your AI editor has open.
 
@@ -146,9 +146,9 @@ If you prefer to configure manually, add the following entry to your AI client's
 
 ---
 
-## 📜 3. Agent Master Prompt & Rules (Automated)
+## 3. Agent Master Prompt & Rules (Automated)
 
-**You do NOT need to manually create rule files!**
+**You do not need to manually create rule files.**
 
 When you run `pmc init` in any project, it **automatically generates** the rule files for you:
 * **Antigravity / AGY CLI**: `.agents/rules/project_memory.md`
@@ -167,7 +167,7 @@ Whenever you make key architectural decisions, discover bugs, fix tricky errors,
 
 ---
 
-## 💻 4. CLI Usage & Commands
+## 4. CLI Usage & Commands
 
 You can run `pmc` in **any** project directory on your machine. It automatically discovers and initializes the `.project-memory/` directory for that workspace.
 
@@ -228,7 +228,7 @@ pmc clear
 
 ---
 
-## 🌐 5. Live Markdown Preview Server
+## 5. Live Markdown Preview Server
 
 PMC includes a real-time web dashboard with live WebSocket reload, theme switcher (Light, Dark, System), full-text search, type filtering, and markdown rendering.
 
@@ -244,7 +244,7 @@ Open your browser at `http://localhost:8080` to interact with your project memor
 
 ---
 
-## 🛠️ 6. MCP Tools Reference
+## 6. MCP Tools Reference
 
 When connected via MCP, AI agents have access to the following 7 tools:
 
@@ -260,7 +260,7 @@ When connected via MCP, AI agents have access to the following 7 tools:
 
 ---
 
-## 🏢 7. Multi-Project Support
+## 7. Multi-Project Support
 
 Project Memory Cortex automatically keeps each codebase's memories isolated:
 - Every project stores its database at `<project-root>/.project-memory/memory.db`.
@@ -272,7 +272,7 @@ Project Memory Cortex automatically keeps each codebase's memories isolated:
 
 ---
 
-## 🧪 8. Testing
+## 8. Testing
 
 Run the full test suite using `pytest`:
 
@@ -282,7 +282,8 @@ pytest tests/ -v
 
 ---
 
-## 📄 License
+## License
 
 MIT License. Designed for AI agents and human developers.
+
 

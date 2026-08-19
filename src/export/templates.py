@@ -524,13 +524,12 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         <div class="sidebar-header">
             <div class="header-top-row">
                 <div class="app-title">
-                    <span>🧠</span>
                     <span>Memory Cortex</span>
                 </div>
                 <div class="theme-switcher">
-                    <button class="theme-btn" data-theme="light" title="Light Theme" onclick="setTheme('light')">☀️</button>
-                    <button class="theme-btn" data-theme="dark" title="Dark Theme" onclick="setTheme('dark')">🌙</button>
-                    <button class="theme-btn active" data-theme="system" title="System Theme" onclick="setTheme('system')">💻</button>
+                    <button class="theme-btn" data-theme="light" title="Light Theme" onclick="setTheme('light')">Light</button>
+                    <button class="theme-btn" data-theme="dark" title="Dark Theme" onclick="setTheme('dark')">Dark</button>
+                    <button class="theme-btn active" data-theme="system" title="System Theme" onclick="setTheme('system')">Auto</button>
                 </div>
             </div>
             <input type="text" class="search-box" placeholder="Search memory nodes..." id="search">
@@ -548,7 +547,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         <div class="sidebar-footer">
             <span class="mem-count-badge" id="mem-count">0 entries</span>
             <button class="btn-clear-all" onclick="openClearAllModal()">
-                <span>🗑️</span>
                 <span>Clear All</span>
             </button>
         </div>
@@ -557,7 +555,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <div class="content-wrapper">
         <div class="action-bar" id="action-bar" style="display: none;">
             <button class="btn-delete" onclick="openDeleteModal()">
-                <span>🗑️</span>
                 <span>Delete Memory</span>
             </button>
         </div>
@@ -573,7 +570,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <div class="modal-overlay" id="delete-modal">
         <div class="modal-card">
             <div class="modal-title">
-                <span>⚠️</span>
                 <span>Confirm Memory Deletion</span>
             </div>
             <div class="modal-body" id="modal-memory-desc">
@@ -590,7 +586,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <div class="modal-overlay" id="clear-all-modal">
         <div class="modal-card">
             <div class="modal-title">
-                <span>⚠️</span>
                 <span>Clear All Project Memories</span>
             </div>
             <div class="modal-body">
