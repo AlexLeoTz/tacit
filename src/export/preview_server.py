@@ -356,9 +356,29 @@ class MarkdownPreviewServer:
             if changed and self.clients and self._ws_loop:
                 self._broadcast_update()
 
+    def _find_available_port(self, start_port: int, max_attempts: int = 50) -> int:
+        """Find an available TCP port starting from start_port."""
+        import socket
+        for p in range(start_port, start_port + max_attempts):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("", p))
+                    return p
+                except OSError:
+                    continue
+        return start_port
+
     def start(self, block: bool = True) -> None:
-        """Start both HTTP and WebSocket preview servers."""
+        """Start both HTTP and WebSocket preview servers with automatic port conflict resolution."""
         self.running = True
+
+        # Check and resolve port conflicts automatically
+        initial_port = self.port
+        self.port = self._find_available_port(self.port)
+        self.ws_port = self._find_available_port(self.port + 1)
+
+        if self.port != initial_port:
+            print(f"Notice: Port {initial_port} in use. Automatically switched to port {self.port} (WS: {self.ws_port}).")
 
         # Start HTTP server
         handler = self._create_http_handler()
@@ -374,8 +394,8 @@ class MarkdownPreviewServer:
         monitor_thread = threading.Thread(target=self._monitor_changes, daemon=True)
         monitor_thread.start()
 
-        print(f"🚀 Project Memory Live Preview running at: http://localhost:{self.port}")
-        print(f"📡 WebSocket live-reload active on port: {self.ws_port}")
+        print(f"Project Memory Live Preview running at: http://localhost:{self.port}")
+        print(f"WebSocket live-reload active on port: {self.ws_port}")
 
         if block:
             try:

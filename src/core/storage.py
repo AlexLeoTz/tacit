@@ -199,11 +199,14 @@ class MemoryStorage:
             conn = self._get_connection()
             try:
                 if self._fts_available and query.strip():
-                    # Clean/sanitize query for FTS5 syntax
-                    sanitized = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
-                    if not sanitized:
+                    import re
+                    # Extract alphanumeric tokens
+                    tokens = re.findall(r"\w+", query)
+                    if not tokens:
                         return []
-                    fts_query = f"{sanitized}*"
+                    
+                    # Construct robust FTS5 query with prefix matching on all tokens: token1* OR token2* or exact phrase
+                    fts_terms = " OR ".join(f'"{t}"*' for t in tokens)
                     
                     if memory_type:
                         sql = """
@@ -213,7 +216,10 @@ class MemoryStorage:
                             ORDER BY bm25(memories_fts)
                             LIMIT ?
                         """
-                        rows = conn.execute(sql, (fts_query, memory_type, limit)).fetchall()
+                        try:
+                            rows = conn.execute(sql, (fts_terms, memory_type, limit)).fetchall()
+                        except Exception:
+                            rows = []
                     else:
                         sql = """
                             SELECT m.* FROM memories m
@@ -222,26 +228,35 @@ class MemoryStorage:
                             ORDER BY bm25(memories_fts)
                             LIMIT ?
                         """
-                        rows = conn.execute(sql, (fts_query, limit)).fetchall()
-                else:
-                    like_query = f"%{query}%"
-                    if memory_type:
-                        sql = """
-                            SELECT * FROM memories
-                            WHERE (content LIKE ? OR summary LIKE ? OR title LIKE ? OR tags LIKE ?)
-                              AND type = ?
-                            ORDER BY timestamp DESC
-                            LIMIT ?
-                        """
-                        rows = conn.execute(sql, (like_query, like_query, like_query, like_query, memory_type, limit)).fetchall()
-                    else:
-                        sql = """
-                            SELECT * FROM memories
-                            WHERE content LIKE ? OR summary LIKE ? OR title LIKE ? OR tags LIKE ?
-                            ORDER BY timestamp DESC
-                            LIMIT ?
-                        """
-                        rows = conn.execute(sql, (like_query, like_query, like_query, like_query, limit)).fetchall()
+                        try:
+                            rows = conn.execute(sql, (fts_terms, limit)).fetchall()
+                        except Exception:
+                            rows = []
+
+                    if rows:
+                        return [MemoryNode.from_dict(dict(row)) for row in rows]
+
+                # Fallback to broad LIKE matching across all words
+                tokens = [t for t in query.split() if t.strip()]
+                if not tokens:
+                    return []
+
+                where_clauses = []
+                params = []
+                for t in tokens:
+                    clause = "(content LIKE ? OR summary LIKE ? OR title LIKE ? OR tags LIKE ?)"
+                    where_clauses.append(clause)
+                    like_term = f"%{t}%"
+                    params.extend([like_term, like_term, like_term, like_term])
+
+                combined_where = " AND ".join(where_clauses)
+                if memory_type:
+                    combined_where = f"({combined_where}) AND type = ?"
+                    params.append(memory_type)
+
+                params.append(limit)
+                sql = f"SELECT * FROM memories WHERE {combined_where} ORDER BY timestamp DESC LIMIT ?"
+                rows = conn.execute(sql, tuple(params)).fetchall()
 
                 return [MemoryNode.from_dict(dict(row)) for row in rows]
             finally:
