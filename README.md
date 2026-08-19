@@ -1,5 +1,4 @@
 # Project Memory Cortex (PMC)
-*(Suggested Brand Names: **Engram**, **CortexFlow**, **RecallAI**, **SynapseDAG**)*
 
 > **Persistent, immutable, timestamped institutional memory for AI coding agents.**  
 > Survives context window wipes, model switches, compaction, and chat resets.
@@ -236,7 +235,7 @@ PMC_DUAL_WRITE=false
 
 ### Update PMC Globally & Refresh Workspace
 ```bash
-# Update PMC to the latest version globally and sync rules in current directory
+# Run in your project directory to upgrade PMC globally and refresh local agent rules
 pmc update
 ```
 
@@ -254,19 +253,24 @@ pmc clear
 
 ---
 
-## 5. Live Markdown Preview Server
+## 5. Live Markdown Preview Server & Dashboard
 
 PMC includes a real-time web dashboard with live WebSocket reload, theme switcher (Light, Dark, System), full-text search, type filtering, and markdown rendering.
 
 ```bash
-# 1. Start live preview server on a custom port
-pmc serve --port 8080
+# 1. Start live preview server (defaults to HTTP: 8080, WebSocket: 8081 or next available)
+pmc serve
 
-# 2. Or export to Markdown files and launch preview immediately
-pmc export --preview --port 8080
+# 2. Specify custom ports for both HTTP and WebSocket (e.g. to avoid conflict with React Native / Expo on 8081)
+pmc serve --port 3000 --ws-port 3001
+
+# 3. Export to Markdown files and launch live preview immediately with custom ports
+pmc export --preview --port 3000 --ws-port 3001
 ```
 
-Open your browser at `http://localhost:8080` to interact with your project memories visually.
+> **Automatic Port Conflict Resolution**: If a port is already taken (e.g. port `8081` by Expo Metro Bundler), PMC automatically scans and binds to the next available free port without crashing.
+
+Open your browser at `http://localhost:3000` (or your configured port) to interact with your project memories visually.
 
 ---
 
