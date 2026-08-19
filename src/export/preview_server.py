@@ -21,11 +21,11 @@ from .templates import HTML_PREVIEW_TEMPLATE
 class MarkdownPreviewServer:
     """Real-time markdown preview and dashboard server with multi-project & WebSocket live-reload."""
 
-    def __init__(self, storage: MemoryStorage, export_dir: Path, port: int = 8080):
+    def __init__(self, storage: MemoryStorage, export_dir: Path, port: int = 8080, ws_port: Optional[int] = None):
         self.storage = storage
         self.export_dir = Path(export_dir)
         self.port = port
-        self.ws_port = port + 1
+        self.ws_port = ws_port if ws_port is not None else (port + 1)
         self.clients: Set[Any] = set()
         self.html_content = HTML_PREVIEW_TEMPLATE
         self.exporter = MarkdownExporter(storage)
@@ -375,11 +375,12 @@ class MarkdownPreviewServer:
 
         # Check and resolve port conflicts automatically
         initial_port = self.port
+        initial_ws_port = self.ws_port
         self.port = self._find_available_port(self.port)
-        self.ws_port = self._find_available_port(self.port + 1)
+        self.ws_port = self._find_available_port(self.ws_port)
 
-        if self.port != initial_port:
-            print(f"Notice: Port {initial_port} in use. Automatically switched to port {self.port} (WS: {self.ws_port}).")
+        if self.port != initial_port or self.ws_port != initial_ws_port:
+            print(f"Notice: Port conflict resolved. HTTP running on {self.port}, WebSocket running on {self.ws_port}.")
 
         # Start HTTP server
         handler = self._create_http_handler()

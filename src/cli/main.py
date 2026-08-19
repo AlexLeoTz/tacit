@@ -256,7 +256,8 @@ def recent(
 def export(
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory for markdown files"),
     preview: bool = typer.Option(False, "--preview", help="Launch live preview server after exporting"),
-    port: int = typer.Option(8080, "--port", help="Port for preview server if --preview is set"),
+    port: int = typer.Option(8080, "--port", help="Port for preview HTTP server if --preview is set"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Export stored memories to categorized Markdown files and generate INDEX.md."""
@@ -289,13 +290,15 @@ def export(
     )
 
     if preview:
-        server = MarkdownPreviewServer(storage, out_dir, port=port)
+        server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
         server.start(block=True)
+
 
 
 @app.command()
 def serve(
-    port: int = typer.Option(8080, "--port", help="Port for preview server"),
+    port: int = typer.Option(8080, "--port", help="Port for preview HTTP server"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to port+1 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
@@ -303,13 +306,14 @@ def serve(
     storage = get_storage(project)
     root = Config.find_project_root(project)
     out_dir = Path(output) if output else Config.get_export_dir(root)
-    server = MarkdownPreviewServer(storage, out_dir, port=port)
+    server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
     server.start(block=True)
 
 
 @app.command(name="dashboard")
 def dashboard(
     port: int = typer.Option(8080, "--port", help="Port for preview and dashboard server"),
+    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to port+1 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
     open_browser: bool = typer.Option(False, "--open", help="Automatically open dashboard in default browser"),
@@ -318,11 +322,11 @@ def dashboard(
     storage = get_storage(project)
     root = Config.find_project_root(project)
     out_dir = Path(output) if output else Config.get_export_dir(root)
-    server = MarkdownPreviewServer(storage, out_dir, port=port)
+
+    server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
     if open_browser:
         import webbrowser
-        import threading
-        threading.Timer(0.8, lambda: webbrowser.open(f"http://localhost:{port}")).start()
+        webbrowser.open(f"http://localhost:{port}")
     server.start(block=True)
 
 
