@@ -133,3 +133,57 @@ class Config:
     @property
     def EXPORT_DIR(self) -> Path:
         return self.get_export_dir()
+
+    @classmethod
+    def check_for_updates(cls) -> Optional[Dict[str, Any]]:
+        """Check GitHub releases API (cached for 24h) and return update info if available."""
+        import time
+        import urllib.request
+        from .. import __version__
+
+        cache_path = cls.REGISTRY_FILE.parent / "pmc_update_cache.json"
+        now = time.time()
+
+        if cache_path.exists():
+            try:
+                data = json.loads(cache_path.read_text(encoding="utf-8"))
+                if now - data.get("last_checked", 0) < 86400:  # 24 hours
+                    latest = data.get("latest_version")
+                    if latest and cls._is_newer_version(__version__, latest):
+                        return {"current": __version__, "latest": latest, "has_update": True}
+                    return {"current": __version__, "latest": latest or __version__, "has_update": False}
+            except Exception:
+                pass
+
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            req = urllib.request.Request(
+                "https://api.github.com/repos/AlexLeoTz/project-memory-cortext/releases/latest",
+                headers={"User-Agent": "PMC-Update-Checker", "Accept": "application/vnd.github.v3+json"},
+            )
+            with urllib.request.urlopen(req, timeout=1.5) as response:
+                if response.status == 200:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    latest_tag = payload.get("tag_name", "").lstrip("v")
+                    if latest_tag:
+                        cache_path.write_text(
+                            json.dumps({"last_checked": now, "latest_version": latest_tag}),
+                            encoding="utf-8",
+                        )
+                        has_up = cls._is_newer_version(__version__, latest_tag)
+                        return {"current": __version__, "latest": latest_tag, "has_update": has_up}
+        except Exception:
+            pass
+
+        return {"current": __version__, "latest": __version__, "has_update": False}
+
+    @classmethod
+    def _is_newer_version(cls, current: str, latest: str) -> bool:
+        """Compare semver strings safely."""
+        try:
+            cur_parts = [int(p) for p in current.split(".") if p.isdigit()]
+            lat_parts = [int(p) for p in latest.split(".") if p.isdigit()]
+            return lat_parts > cur_parts
+        except Exception:
+            return False
+

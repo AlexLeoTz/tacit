@@ -27,6 +27,27 @@ app = typer.Typer(
 console = Console()
 
 
+@app.callback()
+def main_callback(ctx: typer.Context):
+    """Global callback executed before any CLI command."""
+    # Don't show update banner if developer is already running `pmc update` or `pmc mcp`
+    if ctx.invoked_subcommand not in ("update", "mcp"):
+        try:
+            update_info = Config.check_for_updates()
+            if update_info and update_info.get("has_update"):
+                console.print(
+                    Panel.fit(
+                        f"[yellow]Update available:[/yellow] [dim]v{update_info['current']}[/dim] -> [bold green]v{update_info['latest']}[/bold green]\n"
+                        f"Run [bold cyan]pmc update[/bold cyan] to upgrade globally.",
+                        border_style="yellow",
+                        padding=(0, 2),
+                    )
+                )
+        except Exception:
+            pass
+
+
+
 def get_storage(project: Optional[str] = None) -> MemoryStorage:
     """Helper to initialize storage for target or current project root."""
     if project:
