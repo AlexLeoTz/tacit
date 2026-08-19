@@ -214,6 +214,26 @@ pmc recent --days 7
 pmc recent --days 30 --type error --limit 20
 ```
 
+### Export Standalone Markdown Documentation
+```bash
+# Export all memories to categorized markdown files with an INDEX.md table of contents
+pmc export
+
+# Export to a custom backup folder
+pmc export --output ./docs/project-memories
+```
+
+### Dual-Write & Configuration Options
+
+By default, PMC uses **Dual-Write mode**: it saves memories to `memory.db` (for SQLite FTS5 search) AND simultaneously creates human-readable `.md` files in `.project-memory/<category>/`.
+
+To disable markdown auto-sync and use SQLite-only mode:
+
+```bash
+# In your terminal or .env file:
+PMC_DUAL_WRITE=false
+```
+
 ### Update PMC Globally & Refresh Workspace
 ```bash
 # Update PMC to the latest version globally and sync rules in current directory
@@ -225,7 +245,7 @@ pmc update
 # View full markdown of a specific memory (accepts UUID or prefix)
 pmc get 4a9f
 
-# Delete a specific memory
+# Delete a specific memory (auto-removes corresponding .md file)
 pmc delete 4a9f
 
 # Clear all memories for the current project
