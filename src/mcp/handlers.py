@@ -19,10 +19,10 @@ class MemoryMCPHandlers:
         self._storage_cache: Dict[str, MemoryStorage] = {}
         if default_storage:
             self._default_storage = default_storage
+            # Cache default storage under its db path
+            self._storage_cache[str(default_storage.db_path.resolve())] = default_storage
         else:
-            default_root = Config.find_project_root()
-            Config.ensure_directories(default_root)
-            self._default_storage = MemoryStorage(Config.get_db_path(default_root))
+            self._default_storage = None
 
     def _resolve_storage(self, project: Optional[str] = None) -> MemoryStorage:
         """Resolve or initialize SQLite storage for a given project path or active workspace."""

@@ -286,6 +286,25 @@ def serve(
     server.start(block=True)
 
 
+@app.command(name="dashboard")
+def dashboard(
+    port: int = typer.Option(8080, "--port", help="Port for preview and dashboard server"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    open_browser: bool = typer.Option(False, "--open", help="Automatically open dashboard in default browser"),
+):
+    """Start visual Project Memory Dashboard web interface with multi-project support and live-reload."""
+    storage = get_storage(project)
+    root = Config.find_project_root(project)
+    out_dir = Path(output) if output else Config.get_export_dir(root)
+    server = MarkdownPreviewServer(storage, out_dir, port=port)
+    if open_browser:
+        import webbrowser
+        import threading
+        threading.Timer(0.8, lambda: webbrowser.open(f"http://localhost:{port}")).start()
+    server.start(block=True)
+
+
 @app.command()
 def projects():
     """List all registered and discovered projects on this machine."""

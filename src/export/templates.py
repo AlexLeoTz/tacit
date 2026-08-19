@@ -202,6 +202,27 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             color: #ffffff;
         }
 
+        /* Project Selector */
+        .project-bar {
+            margin-bottom: 10px;
+        }
+        .project-dropdown {
+            width: 100%;
+            padding: 7px 10px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.15s ease;
+        }
+        .project-dropdown:focus {
+            border-color: var(--accent);
+        }
+
         .search-box {
             width: 100%;
             padding: 8px 12px;
@@ -287,6 +308,18 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         .badge-architecture { background: #14532d; color: #86efac; }
         .badge-error { background: #7f1d1d; color: #fca5a5; }
         .badge-context { background: #4c1d95; color: #d8b4fe; }
+
+        .proj-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            background: var(--badge-bg);
+            color: var(--accent);
+            border: 1px solid var(--border);
+            margin-left: 6px;
+        }
 
         .item-date {
             font-size: 11px;
@@ -432,6 +465,32 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             padding: 0;
         }
 
+        /* Empty State */
+        .empty-box {
+            padding: 30px 20px;
+            text-align: center;
+            color: var(--fg-muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .empty-box strong { color: var(--fg); }
+        .empty-proj-btn {
+            display: inline-block;
+            margin-top: 8px;
+            margin-right: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .empty-proj-btn:hover {
+            background: var(--card-hover);
+        }
+
         /* Modal Dialog */
         .modal-overlay {
             position: fixed;
@@ -532,6 +591,12 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                     <button class="theme-btn active" data-theme="system" title="System Theme" onclick="setTheme('system')">Auto</button>
                 </div>
             </div>
+            <div class="project-bar">
+                <select class="project-dropdown" id="project-select" onchange="onProjectChange(this.value)">
+                    <option value="current">Current Workspace</option>
+                    <option value="all">All Projects</option>
+                </select>
+            </div>
             <input type="text" class="search-box" placeholder="Search memory nodes..." id="search">
             <div class="filter-chips" id="filter-chips">
                 <div class="filter-chip active" data-type="all">All</div>
@@ -586,10 +651,10 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <div class="modal-overlay" id="clear-all-modal">
         <div class="modal-card">
             <div class="modal-title">
-                <span>Clear All Project Memories</span>
+                <span>Clear Project Memories</span>
             </div>
             <div class="modal-body">
-                Are you <strong>ABSOLUTELY SURE</strong> you want to permanently delete <strong>ALL memories</strong> for this project?
+                Are you <strong>ABSOLUTELY SURE</strong> you want to permanently delete memories for this project selection?
                 <br><br>
                 <span style="color: #ef4444;">This action cannot be undone.</span>
             </div>
@@ -606,6 +671,9 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <script>
         let ws;
         let memories = [];
+        let projects = [];
+        let currentProjectName = "";
+        let selectedProject = localStorage.getItem('pmc_selected_project') || "current";
         let currentMemoryId = null;
         let currentFilter = "all";
 
@@ -625,6 +693,50 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
+        function updateProjectDropdown() {
+            const selectEl = document.getElementById('project-select');
+            if (!selectEl) return;
+
+            let totalMemories = 0;
+            projects.forEach(p => { totalMemories += (p.count || 0); });
+
+            let html = `<option value="current" ${selectedProject === 'current' ? 'selected' : ''}>Active Workspace (${currentProjectName || 'Current'})</option>`;
+            html += `<option value="all" ${selectedProject === 'all' ? 'selected' : ''}>All Projects (${totalMemories} total)</option>`;
+
+            projects.forEach(p => {
+                const label = `${p.name} (${p.count} ${p.count === 1 ? 'memory' : 'memories'})`;
+                const isSel = (selectedProject === p.name);
+                html += `<option value="${p.name}" ${isSel ? 'selected' : ''}>${label}</option>`;
+            });
+
+            selectEl.innerHTML = html;
+        }
+
+        function onProjectChange(newProject) {
+            selectedProject = newProject;
+            localStorage.setItem('pmc_selected_project', selectedProject);
+            currentMemoryId = null;
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: "switch_project", project: selectedProject }));
+            } else {
+                fetch(`/api/memories?project=${encodeURIComponent(selectedProject)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        memories = data || [];
+                        updateCountBadge();
+                        renderList();
+                        if (memories.length > 0) loadMemory(memories[0].id);
+                    });
+            }
+        }
+
+        function switchProjectDirectly(projName) {
+            const selectEl = document.getElementById('project-select');
+            if (selectEl) selectEl.value = projName;
+            onProjectChange(projName);
+        }
+
         function connectWS() {
             const wsUrl = `ws://${window.location.hostname}:${parseInt(window.location.port) + 1}`;
             ws = new WebSocket(wsUrl);
@@ -633,6 +745,10 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 const status = document.getElementById('status');
                 status.textContent = '● Connected';
                 status.className = 'connection-status';
+                // Request current selected project data
+                if (selectedProject !== "current") {
+                    ws.send(JSON.stringify({ action: "switch_project", project: selectedProject }));
+                }
             };
 
             ws.onclose = () => {
@@ -646,6 +762,17 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'memories' || data.type === 'update') {
+                        if (data.projects) {
+                            projects = data.projects;
+                        }
+                        if (data.current_project) {
+                            currentProjectName = data.current_project;
+                        }
+                        if (data.selected_project) {
+                            selectedProject = data.selected_project;
+                        }
+                        updateProjectDropdown();
+
                         memories = data.memories || [];
                         updateCountBadge();
                         renderList();
@@ -656,7 +783,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                         } else {
                             currentMemoryId = null;
                             document.getElementById('action-bar').style.display = 'none';
-                            document.getElementById('rendered-content').innerHTML = '<h1>No memories recorded</h1><p>Use CLI or Antigravity to record memories in this workspace.</p>';
+                            renderEmptyState();
                         }
                     }
                 } catch (err) {
@@ -676,6 +803,24 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             return `badge-${type.toLowerCase()}`;
         }
 
+        function renderEmptyState() {
+            const contentEl = document.getElementById('rendered-content');
+            const otherProjsWithMem = projects.filter(p => p.count > 0 && p.name !== selectedProject);
+            
+            let extraHelp = "";
+            if (otherProjsWithMem.length > 0) {
+                extraHelp = `<br><br><div style="font-size:13px; color: var(--fg-muted);">Memories were found in other project workspaces on your machine:</div><div style="margin-top:8px;">` +
+                    otherProjsWithMem.map(p => `<button class="empty-proj-btn" onclick="switchProjectDirectly('${p.name}')">${p.name} (${p.count})</button>`).join('') +
+                    `<button class="empty-proj-btn" onclick="switchProjectDirectly('all')">View All Projects</button></div>`;
+            }
+
+            contentEl.innerHTML = `
+                <h1>No memories found in selected workspace</h1>
+                <p>Use your AI assistant (Antigravity, Cursor, Claude) or run <code>pmc remember "..."</code> to record institutional memories.</p>
+                ${extraHelp}
+            `;
+        }
+
         function renderList() {
             const listEl = document.getElementById('memory-list');
             const searchVal = document.getElementById('search').value.toLowerCase().trim();
@@ -688,12 +833,20 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                     (m.title && m.title.toLowerCase().includes(searchVal)) ||
                     (m.summary && m.summary.toLowerCase().includes(searchVal)) ||
                     (m.type && m.type.toLowerCase().includes(searchVal)) ||
+                    (m.project && m.project.toLowerCase().includes(searchVal)) ||
                     (m.tags && m.tags.some(t => t.toLowerCase().includes(searchVal)))
                 );
             });
 
             if (filtered.length === 0) {
-                listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--fg-muted); font-size: 13px;">No matching memories found</div>';
+                const otherProjsWithMem = projects.filter(p => p.count > 0 && p.name !== selectedProject);
+                let switchHint = "";
+                if (otherProjsWithMem.length > 0 && memories.length === 0) {
+                    switchHint = `<div style="margin-top:10px;">Found memories in:<br>` +
+                        otherProjsWithMem.map(p => `<button class="empty-proj-btn" onclick="switchProjectDirectly('${p.name}')">${p.name} (${p.count})</button>`).join('') +
+                        `</div>`;
+                }
+                listEl.innerHTML = `<div class="empty-box">No matching memories found.${switchHint}</div>`;
                 return;
             }
 
@@ -701,10 +854,14 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 const dateStr = new Date(m.timestamp * 1000).toLocaleDateString(undefined, {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                 });
+                const projLabel = (selectedProject === 'all' && m.project) ? `<span class="proj-badge">${m.project}</span>` : '';
                 return `
                     <div class="memory-item ${currentMemoryId === m.id ? 'active' : ''}" onclick="loadMemory('${m.id}')">
                         <div class="item-header">
-                            <span class="type-badge ${getBadgeClass(m.type)}">${m.type}</span>
+                            <div>
+                                <span class="type-badge ${getBadgeClass(m.type)}">${m.type}</span>
+                                ${projLabel}
+                            </div>
                             <span class="item-date">${dateStr}</span>
                         </div>
                         <div class="item-title">${m.title || m.summary}</div>
@@ -741,12 +898,14 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         function confirmDeleteMemory() {
             if (!currentMemoryId) return;
             const targetId = currentMemoryId;
+            const mem = memories.find(m => m.id === targetId);
+            const targetProj = mem?.project || selectedProject;
             closeDeleteModal();
 
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: "delete", node_id: targetId }));
+                ws.send(JSON.stringify({ action: "delete", node_id: targetId, project: targetProj }));
             } else {
-                fetch(`/api/memories/${targetId}`, { method: 'DELETE' })
+                fetch(`/api/memories/${targetId}?project=${encodeURIComponent(targetProj)}`, { method: 'DELETE' })
                     .then(res => res.json())
                     .then(() => {
                         memories = memories.filter(m => m.id !== targetId);
@@ -768,16 +927,16 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         function confirmClearAllMemories() {
             closeClearAllModal();
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: "clear" }));
+                ws.send(JSON.stringify({ action: "clear", project: selectedProject }));
             } else {
-                fetch(`/api/memories`, { method: 'DELETE' })
+                fetch(`/api/memories?project=${encodeURIComponent(selectedProject)}`, { method: 'DELETE' })
                     .then(res => res.json())
                     .then(() => {
                         memories = [];
                         updateCountBadge();
                         renderList();
                         document.getElementById('action-bar').style.display = 'none';
-                        document.getElementById('rendered-content').innerHTML = '<h1>No memories recorded</h1><p>Project memories cleared.</p>';
+                        renderEmptyState();
                     });
             }
         }
@@ -795,7 +954,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             renderList();
         });
 
-        // Initialize Theme & WebSocket
+        // Initialize Theme, Projects & WebSocket
         initTheme();
         connectWS();
     </script>
