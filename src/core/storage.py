@@ -86,8 +86,63 @@ class MemoryStorage:
             finally:
                 conn.close()
 
+    def _write_markdown_file(self, node: MemoryNode) -> None:
+        """Write an individual memory node as a formatted markdown file in its category directory."""
+        try:
+            import re
+            from datetime import datetime
+            from ..export.templates import MEMORY_MARKDOWN_TEMPLATE
+
+            category_dir = self.db_path.parent / node.type
+            category_dir.mkdir(parents=True, exist_ok=True)
+
+            date_prefix = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d")
+            slug = re.sub(r"[^\w\s-]", "", node.title or node.summary).strip().lower()
+            slug = re.sub(r"[-\s]+", "-", slug)[:50] or "memory"
+            filename = f"{date_prefix}_{slug}_{node.id[:8]}.md"
+            file_path = category_dir / filename
+
+            date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+            md_content = MEMORY_MARKDOWN_TEMPLATE.format(
+                title=node.title or node.summary,
+                id=node.id,
+                type=node.type,
+                date=date_str,
+                impact=node.impact,
+                status=node.status,
+                author=node.author,
+                summary=node.summary,
+                content=node.content,
+                tags=", ".join(node.tags) if node.tags else "None",
+                scope=", ".join(node.scope) if node.scope else "Global",
+                parents=", ".join(f"`{p}`" for p in node.parents) if node.parents else "None",
+                children=", ".join(f"`{c}`" for c in node.children) if node.children else "None",
+                related=", ".join(f"`{r}`" for r in node.related) if node.related else "None",
+                content_hash=node.content_hash,
+                merkle_root=node.merkle_root,
+            )
+            file_path.write_text(md_content, encoding="utf-8")
+        except Exception:
+            pass
+
+    def _delete_markdown_file(self, node_id: str, memory_type: Optional[str] = None) -> None:
+        """Delete markdown file corresponding to node_id from category directory."""
+        try:
+            target_dirs = [self.db_path.parent / memory_type] if memory_type else [
+                self.db_path.parent / t for t in ("decision", "architecture", "hack", "command", "error", "context")
+            ]
+            for cat_dir in target_dirs:
+                if cat_dir.exists():
+                    for md_file in cat_dir.glob(f"*_{node_id[:8]}.md"):
+                        try:
+                            md_file.unlink()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     def add_memory(self, node: MemoryNode) -> bool:
-        """Add memory node to SQLite database and update FTS index."""
+        """Add memory node to SQLite database, update FTS index, and write markdown file."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -114,6 +169,8 @@ class MemoryStorage:
                     """, (node.id, node.content, node.summary, node.title, tags_str))
 
                 conn.commit()
+                # Dual-write: write markdown file immediately to category directory
+                self._write_markdown_file(node)
                 return True
             except sqlite3.IntegrityError:
                 return False
@@ -240,7 +297,7 @@ class MemoryStorage:
                 conn.close()
 
     def delete_memory(self, node_id: str) -> bool:
-        """Delete a single memory by ID from memories and FTS index."""
+        """Delete a single memory by ID from memories, FTS index, and markdown files."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -249,12 +306,14 @@ class MemoryStorage:
                 if self._fts_available and deleted:
                     conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (node_id,))
                 conn.commit()
+                if deleted:
+                    self._delete_markdown_file(node_id)
                 return deleted
             finally:
                 conn.close()
 
     def clear_all_memories(self) -> int:
-        """Delete all memories in this project database."""
+        """Delete all memories in this project database and clean markdown category directories."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -263,6 +322,16 @@ class MemoryStorage:
                 if self._fts_available:
                     conn.execute("DELETE FROM memories_fts")
                 conn.commit()
+                # Clean markdown files
+                for t in ("decision", "architecture", "hack", "command", "error", "context"):
+                    cat_dir = self.db_path.parent / t
+                    if cat_dir.exists():
+                        for f in cat_dir.glob("*.md"):
+                            try:
+                                f.unlink()
+                            except Exception:
+                                pass
                 return count
             finally:
                 conn.close()
+
