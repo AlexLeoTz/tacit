@@ -153,7 +153,8 @@ class MarkdownPreviewServer:
                     self.send_response(200)
                     self.send_header("Content-type", "text/html; charset=utf-8")
                     self.end_headers()
-                    self.wfile.write(server_self.html_content.encode("utf-8"))
+                    rendered_html = server_self.html_content.replace("__WS_PORT__", str(server_self.ws_port))
+                    self.wfile.write(rendered_html.encode("utf-8"))
                 elif parsed.path == "/api/projects":
                     projects = server_self._get_projects_list()
                     current_root = Config.find_project_root()

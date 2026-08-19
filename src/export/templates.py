@@ -738,7 +738,8 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         }
 
         function connectWS() {
-            const wsUrl = `ws://${window.location.hostname}:${parseInt(window.location.port) + 1}`;
+            const wsPort = "__WS_PORT__" !== "__" + "WS_PORT__" ? "__WS_PORT__" : (parseInt(window.location.port) + 1);
+            const wsUrl = `ws://${window.location.hostname}:${wsPort}`;
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
