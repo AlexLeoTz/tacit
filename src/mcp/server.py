@@ -86,12 +86,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         res = handlers.handle_memory_projects()
         return res.get("formatted") or json.dumps(res, indent=2)
 
-    @mcp.tool()
-    def memory_delete(node_id: str, project: Optional[str] = None) -> str:
-        """Delete a specific memory entry by ID from the project."""
-        res = handlers.handle_memory_delete(node_id=node_id, project=project)
-        return res.get("message") or json.dumps(res, indent=2)
-
     @mcp.prompt("project-memory-instructions")
     def project_memory_instructions() -> str:
         """System instructions for AI agents on how to use Project Memory Cortex."""

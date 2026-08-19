@@ -276,7 +276,7 @@ Open your browser at `http://localhost:4000` (or your configured port) to intera
 
 ## 6. MCP Tools Reference
 
-When connected via MCP, AI agents have access to the following 7 tools:
+When connected via MCP, AI agents have access to the following 6 tools:
 
 | Tool | Purpose | Key Arguments |
 |---|---|---|
@@ -286,7 +286,8 @@ When connected via MCP, AI agents have access to the following 7 tools:
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
 | `memory_context` | Bootstrap an AI agent session with organized project knowledge. | `timeframe` (`session`, `week`, `month`, `all`) |
 | `memory_projects`| List all registered project workspaces across your machine. | None |
-| `memory_delete` | Delete a specific memory node from storage. | `node_id` |
+
+> **Safety Notice**: Deletion is intentionally restricted to human developers via the CLI (`pmc delete <id>`) or Dashboard UI to prevent AI agents from accidentally erasing historical institutional memory.
 
 ---
 
