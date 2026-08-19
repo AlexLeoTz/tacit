@@ -214,6 +214,12 @@ pmc recent --days 7
 pmc recent --days 30 --type error --limit 20
 ```
 
+### Update PMC Globally & Refresh Workspace
+```bash
+# Update PMC to the latest version globally and sync rules in current directory
+pmc update
+```
+
 ### View Details & Delete
 ```bash
 # View full markdown of a specific memory (accepts UUID or prefix)

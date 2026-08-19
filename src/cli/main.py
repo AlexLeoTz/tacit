@@ -482,7 +482,63 @@ def install_mcp(
         console.print(json.dumps({"mcpServers": {"project-memory": config_entry}}, indent=2))
 
 
+@app.command()
+def update(
+    git_url: str = typer.Option("https://github.com/AlexLeoTz/project-memory-cortext.git", "--url", help="Git repository URL to update from"),
+):
+    """Update PMC globally to the latest version from GitHub and refresh project rules in the current directory."""
+    import subprocess
+    import sys
+
+    console.print("[cyan]Updating Project Memory Cortex (PMC) globally...[/cyan]")
+    pip_target = f"git+{git_url}"
+
+    try:
+        # 1. Update the global python package via pip
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--no-cache-dir", pip_target]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+        if result.returncode != 0:
+            # Fallback if in local git repo directory
+            current_root = Config.find_project_root()
+            if (current_root / "setup.py").exists():
+                console.print("[yellow]Remote pip install returned error, upgrading via local editable mode...[/yellow]")
+                subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=current_root, check=False)
+            else:
+                console.print(f"[red]Update failed: {result.stderr}[/red]")
+                return
+
+        # 2. Refresh rules in current workspace
+        current_root = Config.find_project_root()
+        rule_content = """# Project Memory Rules
+
+Whenever you make key architectural decisions, discover bugs, fix tricky errors, or execute critical deploy/setup commands in this project:
+1. **Record key decisions**: Call `memory_add` with type `decision`, `architecture`, `hack`, `command`, or `error`.
+2. **Context on session start**: Call `memory_context` to recall institutional memory and past design decisions.
+"""
+        agy_rule = current_root / ".agents" / "rules" / "project_memory.md"
+        if agy_rule.exists() or (current_root / ".agents").exists():
+            agy_rule.parent.mkdir(parents=True, exist_ok=True)
+            agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Project Memory Cortex\n---\n\n{rule_content}", encoding="utf-8")
+
+        cursor_rule = current_root / ".cursorrules"
+        if cursor_rule.exists():
+            cursor_rule.write_text(rule_content, encoding="utf-8")
+
+        console.print(Panel.fit(
+            f"[bold green]Project Memory Cortex Successfully Updated![/bold green]\n"
+            f"[dim]Version Source:[/dim] {git_url}\n"
+            f"[dim]Active Project:[/dim] {current_root.resolve()}\n\n"
+            f"[cyan]Global 'pmc' CLI and local workspace rules are up to date.[/cyan]",
+            border_style="green",
+        ))
+
+    except Exception as e:
+        console.print(f"[bold red]Failed to update PMC: {e}[/bold red]")
+
+
 if __name__ == "__main__":
     app()
+
 
 
