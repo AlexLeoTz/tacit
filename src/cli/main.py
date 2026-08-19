@@ -519,8 +519,8 @@ def update(
     pip_target = f"git+{git_url}"
 
     try:
-        # 1. Update the global python package via pip
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--no-cache-dir", pip_target]
+        # 1. Update the global python package via pip with force-reinstall
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-deps", pip_target]
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode != 0:
