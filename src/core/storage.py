@@ -169,8 +169,10 @@ class MemoryStorage:
                     """, (node.id, node.content, node.summary, node.title, tags_str))
 
                 conn.commit()
-                # Dual-write: write markdown file immediately to category directory
-                self._write_markdown_file(node)
+                # Dual-write: write markdown file immediately to category directory if enabled
+                from ..utils.config import Config
+                if Config.DUAL_WRITE:
+                    self._write_markdown_file(node)
                 return True
             except sqlite3.IntegrityError:
                 return False
