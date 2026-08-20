@@ -1,5 +1,9 @@
 # Project Memory Cortex (PMC)
 
+<p align="center">
+  <img src="docs/logo.jpg" alt="Project Memory Cortex Logo" width="300" />
+</p>
+
 > **Persistent, immutable, timestamped institutional memory for AI coding agents.**  
 > Survives context window wipes, model switches, compaction, and chat resets.
 
