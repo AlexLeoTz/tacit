@@ -60,11 +60,16 @@ class MemoryMCPHandlers:
     ) -> Dict[str, Any]:
         """Create and store an immutable memory node in target project storage."""
         storage = self._resolve_storage(project)
-        tags = tags or []
-        scope = scope or []
-        parents = parents or []
-        related = related or []
-        metadata = metadata or {}
+        # Pre-flight check: If agent didn't provide parents, check for existing similar memories
+        linked_hint = ""
+        if not parents:
+            pre_flight_query = title or summary or content[:100]
+            existing_matches = storage.search_full_text(query=pre_flight_query, limit=3, memory_type=type)
+            if existing_matches:
+                top_match = existing_matches[0]
+                # If top match is highly relevant, link it as parent
+                parents = [top_match.id]
+                linked_hint = f" (Auto-linked to related ancestor: '{top_match.title or top_match.summary}' [`{top_match.id[:8]}`])"
 
         node = MemoryNode(
             id=str(uuid.uuid4()),
@@ -90,14 +95,15 @@ class MemoryMCPHandlers:
                 "id": node.id,
                 "summary": node.summary,
                 "type": node.type,
+                "parents": parents,
                 "content_hash": node.content_hash,
-                "message": f"✅ Memory recorded [{node.type}]{proj_label}: {node.summary} (ID: {node.id})",
+                "message": f"Memory recorded [{node.type}]{proj_label}: {node.summary} (ID: {node.id}){linked_hint}",
             }
         else:
             return {
                 "success": False,
                 "id": node.id,
-                "message": f"❌ Failed to record memory{proj_label}: duplicate or integrity error.",
+                "message": f"Failed to record memory{proj_label}: duplicate or integrity error.",
             }
 
     def handle_memory_search(
@@ -146,7 +152,9 @@ class MemoryMCPHandlers:
         }
 
     def handle_memory_get(self, node_id: str, project: Optional[str] = None) -> Dict[str, Any]:
-        """Retrieve full details of a single memory by ID in target project."""
+        """Retrieve full details of a single memory by ID in target project with full lineage tree."""
+        from ..core.memory_dag import MemoryDAG
+
         storage = self._resolve_storage(project)
         node = storage.get_memory(node_id)
         if not node:
@@ -154,6 +162,35 @@ class MemoryMCPHandlers:
                 "found": False,
                 "message": f"Memory node with ID '{node_id}' was not found.",
             }
+
+        # Build lineage tree
+        all_nodes = storage.get_all(limit=1000)
+        dag = MemoryDAG()
+        for n in sorted(all_nodes, key=lambda x: x.timestamp):
+            try:
+                dag.add_node(n)
+            except Exception:
+                pass
+
+        ancestors = [dag.get_node(aid) for aid in dag.get_ancestors(node.id) if dag.get_node(aid)]
+        descendants = [dag.get_node(did) for did in dag.get_descendants(node.id) if dag.get_node(did)]
+
+        ancestry_tree_lines = []
+        if ancestors:
+            ancestry_tree_lines.append("CAUSAL ANCESTORS (Foundations):")
+            for a in sorted(ancestors, key=lambda x: x.timestamp):
+                ancestry_tree_lines.append(f"  └── [{a.type}] {a.title or a.summary} (`{a.id[:8]}`)")
+        else:
+            ancestry_tree_lines.append("CAUSAL ANCESTORS: None (Root Decision)")
+
+        if descendants:
+            ancestry_tree_lines.append("\nCAUSAL DESCENDANTS (Derived):")
+            for d in sorted(descendants, key=lambda x: x.timestamp):
+                ancestry_tree_lines.append(f"  └── [{d.type}] {d.title or d.summary} (`{d.id[:8]}`)")
+        else:
+            ancestry_tree_lines.append("CAUSAL DESCENDANTS: None")
+
+        lineage_block = "\n".join(ancestry_tree_lines)
 
         date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
         formatted = f"""==================================================
@@ -175,6 +212,9 @@ Scope: {', '.join(node.scope) if node.scope else 'Global'}
 Parents: {', '.join(node.parents) if node.parents else 'None'}
 Children: {', '.join(node.children) if node.children else 'None'}
 Related: {', '.join(node.related) if node.related else 'None'}
+
+DECISION TREE / CAUSALITY:
+{lineage_block}
 
 INTEGRITY:
 Content Hash: {node.content_hash}

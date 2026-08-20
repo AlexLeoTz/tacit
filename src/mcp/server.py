@@ -90,11 +90,18 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
     def project_memory_instructions() -> str:
         """System instructions for AI agents on how to use Project Memory Cortex."""
         return (
-            "You are equipped with Project Memory Cortex tools to maintain persistent project memory.\n"
-            "1. At session start, call `memory_context` to review past architectural decisions, hacks, and errors.\n"
-            "2. Whenever you make an architectural decision, discover a bug, solve a tricky error, or run a setup command, "
-            "immediately call `memory_add` with the appropriate type (decision, architecture, hack, command, error).\n"
-            "3. Use `memory_search` whenever you need past context on a topic or component."
+            "You are equipped with Project Memory Cortex (PMC) tools for maintaining persistent institutional memory.\n"
+            "Follow these strict architectural protocols:\n\n"
+            "1. SESSION BOOTSTRAP: At the start of a session or when exploring a codebase area, call `memory_context` "
+            "to recall existing architectural patterns, critical commands, hacks, and solved errors.\n\n"
+            "2. TAXONOMY & CAUSAL LINEAGE: When calling `memory_add`, always provide:\n"
+            "   - `tags`: At least 2 specific keywords (e.g. ['auth', 'jwt', 'security']).\n"
+            "   - `scope`: Subsystem or directory path affected (e.g. ['/api/auth']).\n"
+            "   - `parents`: Link the UUID(s) of any past decisions from `memory_context` that this new entry modifies, extends, or is derived from.\n\n"
+            "3. END-OF-TASK SELF-REFLECTION: At the conclusion of any non-trivial coding task, ask yourself:\n"
+            "   'Did I make a key architectural choice, establish a reusable command, implement a tricky bugfix, or apply a necessary workaround?'\n"
+            "   If YES, record it using `memory_add`. If NO (e.g., minor typo/formatting), do not add noise to memory.\n\n"
+            "4. TARGETED SEARCH: Use `memory_search` to query past decisions before introducing new libraries, databases, or schemas."
         )
 
     return mcp

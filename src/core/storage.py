@@ -122,8 +122,14 @@ class MemoryStorage:
                 merkle_root=node.merkle_root,
             )
             file_path.write_text(md_content, encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            # Fallback direct write if anything fails
+            try:
+                cat_dir = self.db_path.parent / (node.type or "context")
+                cat_dir.mkdir(parents=True, exist_ok=True)
+                (cat_dir / f"{node.id[:8]}.md").write_text(f"# {node.title or node.summary}\n\n{node.content}", encoding="utf-8")
+            except Exception:
+                pass
 
     def _delete_markdown_file(self, node_id: str, memory_type: Optional[str] = None) -> None:
         """Delete markdown file corresponding to node_id from category directory."""

@@ -75,11 +75,21 @@ def init(
     count = storage.get_count()
 
     # Automatically generate agent rules for Antigravity, Cursor, and Claude
-    rule_content = """# Project Memory Rules
+    rule_content = """# Autonomous Institutional Memory Rules (PMC)
 
-Whenever you make key architectural decisions, discover bugs, fix tricky errors, or execute critical deploy/setup commands in this project:
-1. **Record key decisions**: Call `memory_add` with type `decision`, `architecture`, `hack`, `command`, or `error`.
-2. **Context on session start**: Call `memory_context` to recall institutional memory and past design decisions.
+You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
+
+## Mandatory Agent Workflow:
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
+   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
+   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
+   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
+   - At the conclusion of any non-trivial coding task, ask yourself:
+     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, `error`).
+   - If NO (e.g., routine refactor or typo fix), do not pollute project memory.
 """
     # 1. Antigravity rule
     agy_rule = target_root / ".agents" / "rules" / "project_memory.md"
@@ -250,6 +260,113 @@ def recent(
         )
 
     console.print(table)
+
+
+@app.command(name="tree")
+def tree(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Visualize the full causal decision tree (DAG) for the project."""
+    from rich.tree import Tree
+    from ..core.memory_dag import MemoryDAG
+
+    storage = get_storage(project)
+    nodes = storage.get_all(limit=500)
+    if not nodes:
+        console.print("[yellow]No memories recorded in this project yet.[/yellow]")
+        return
+
+    # Build DAG
+    dag = MemoryDAG()
+    for n in sorted(nodes, key=lambda x: x.timestamp):
+        try:
+            dag.add_node(n)
+        except Exception:
+            pass
+
+    # Root nodes are nodes with no parents
+    root_nodes = [n for n in nodes if not n.parents]
+    if not root_nodes:
+        root_nodes = nodes[:1]
+
+    root_tree = Tree(f"[bold cyan]Project Memory DAG[/bold cyan] ({len(nodes)} total nodes)")
+
+    def add_children(tree_branch, node_id, visited=None):
+        if visited is None:
+            visited = set()
+        if node_id in visited:
+            return
+        visited.add(node_id)
+        children_ids = dag.edges.get(node_id, set())
+        for cid in sorted(children_ids):
+            child_node = dag.get_node(cid)
+            if child_node:
+                branch = tree_branch.add(
+                    f"[{child_node.type.lower()}][bold]{child_node.type.upper()}[/bold][/{child_node.type.lower()}] "
+                    f"[white]{child_node.title or child_node.summary}[/white] [dim]({child_node.id[:8]})[/dim]"
+                )
+                add_children(branch, cid, visited.copy())
+
+    for rnode in root_nodes:
+        branch = root_tree.add(
+            f"[{rnode.type.lower()}][bold]{rnode.type.upper()}[/bold][/{rnode.type.lower()}] "
+            f"[white]{rnode.title or rnode.summary}[/white] [dim]({rnode.id[:8]})[/dim]"
+        )
+        add_children(branch, rnode.id)
+
+    console.print(root_tree)
+
+
+@app.command(name="lineage")
+def lineage(
+    node_id: str = typer.Argument(..., help="Memory node UUID or prefix to inspect ancestry"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Trace and print the full causal ancestor and descendant tree of a specific memory."""
+    from ..core.memory_dag import MemoryDAG
+
+    storage = get_storage(project)
+    nodes = storage.get_all(limit=1000)
+    target_node = None
+    for n in nodes:
+        if n.id == node_id or n.id.startswith(node_id):
+            target_node = n
+            break
+
+    if not target_node:
+        console.print(f"[red]Memory entry '{node_id}' not found.[/red]")
+        return
+
+    dag = MemoryDAG()
+    for n in sorted(nodes, key=lambda x: x.timestamp):
+        try:
+            dag.add_node(n)
+        except Exception:
+            pass
+
+    ancestors = [dag.get_node(aid) for aid in dag.get_ancestors(target_node.id) if dag.get_node(aid)]
+    descendants = [dag.get_node(did) for did in dag.get_descendants(target_node.id) if dag.get_node(did)]
+
+    lines = [f"[bold cyan]Causal Lineage for:[/bold cyan] {target_node.title or target_node.summary} [dim]({target_node.id[:8]})[/dim]\n"]
+
+    if ancestors:
+        lines.append("[bold yellow]Ancestors (Causal Foundations):[/bold yellow]")
+        for a in sorted(ancestors, key=lambda x: x.timestamp):
+            lines.append(f"  └── [{a.type}] {a.title or a.summary} [dim]({a.id[:8]})[/dim]")
+    else:
+        lines.append("[dim]No ancestor nodes (Root Decision)[/dim]")
+
+    lines.append(f"\n[bold green]► Target Node:[/bold green] [{target_node.type}] {target_node.title or target_node.summary} [dim]({target_node.id})[/dim]")
+
+    if descendants:
+        lines.append("\n[bold magenta]Descendants (Derived Decisions/Hacks):[/bold magenta]")
+        for d in sorted(descendants, key=lambda x: x.timestamp):
+            lines.append(f"  └── [{d.type}] {d.title or d.summary} [dim]({d.id[:8]})[/dim]")
+    else:
+        lines.append("[dim]No downstream descendants yet[/dim]")
+
+    console.print(Panel("\n".join(lines), title="Memory Causal Lineage", border_style="cyan"))
+
 
 
 @app.command()
@@ -535,11 +652,21 @@ def update(
 
         # 2. Refresh rules in current workspace
         current_root = Config.find_project_root()
-        rule_content = """# Project Memory Rules
+        rule_content = """# Autonomous Institutional Memory Rules (PMC)
 
-Whenever you make key architectural decisions, discover bugs, fix tricky errors, or execute critical deploy/setup commands in this project:
-1. **Record key decisions**: Call `memory_add` with type `decision`, `architecture`, `hack`, `command`, or `error`.
-2. **Context on session start**: Call `memory_context` to recall institutional memory and past design decisions.
+You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
+
+## Mandatory Agent Workflow:
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
+   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
+   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
+   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
+   - At the conclusion of any non-trivial coding task, ask yourself:
+     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`).
+   - If NO (e.g., routine refactor or typo fix), do not pollute project memory.
 """
         agy_rule = current_root / ".agents" / "rules" / "project_memory.md"
         if agy_rule.exists() or (current_root / ".agents").exists():
