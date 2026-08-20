@@ -157,11 +157,21 @@ When you run `pmc init` in any project, it **automatically generates** the rule 
 If you ever need to inspect or customize the rules, here is the generated template:
 
 ```markdown
-# Project Memory Rules
+# Autonomous Institutional Memory Rules (PMC)
 
-Whenever you make key architectural decisions, discover bugs, fix tricky errors, or execute critical deploy/setup commands in this project:
-1. **Record key decisions**: Call `memory_add` with type `decision`, `architecture`, `hack`, `command`, or `error`.
-2. **Context on session start**: Call `memory_context` to recall institutional memory and past design decisions.
+You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
+
+## Mandatory Agent Workflow:
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
+   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
+   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
+   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
+   - At the conclusion of any non-trivial coding task, ask yourself:
+     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`).
+   - If NO (e.g., routine refactor or typo fix), do not pollute project memory.
 ```
 
 ---
@@ -240,6 +250,7 @@ pmc update
 ```
 
 ### View Details & Delete
+
 ```bash
 # View full markdown of a specific memory (accepts UUID or prefix)
 pmc get 4a9f
@@ -250,6 +261,22 @@ pmc delete 4a9f
 # Clear all memories for the current project
 pmc clear
 ```
+
+### Visualizing Causal DAGs & Lineage
+
+PMC provides built-in tools to inspect project history and dependencies:
+
+```bash
+# Renders the entire project decision DAG as a nested ASCII tree
+pmc tree
+
+# Traces causal foundations (ancestors) and derived decisions (descendants) for a specific node
+pmc lineage 4a9f
+```
+
+### Pre-Flight Semantic Auto-Linking
+
+When recording a memory (`pmc remember` or `memory_add`), PMC checks for parent relationships. If no parent links are supplied, the core runs a **pre-flight semantic similarity lookup** on existing memories. If a highly relevant context node is found, it automatically links it as a parent node, ensuring DAG continuity without manual intervention.
 
 ---
 

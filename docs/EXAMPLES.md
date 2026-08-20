@@ -36,6 +36,15 @@ python -m src.cli.main search "numpy"
 python -m src.cli.main search "sqlite" --type architecture
 ```
 
+### Visualize Memory DAG and Lineage
+```bash
+# Renders the entire project memory DAG as a nested ASCII tree
+python -m src.cli.main tree
+
+# Traces causal ancestors and descendants for a specific memory node
+python -m src.cli.main lineage <node_id_prefix>
+```
+
 ### Export to Markdown and Launch Live Preview
 ```bash
 python -m src.cli.main export --preview --port 8080
