@@ -58,8 +58,8 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             --card-active: #2f3440;
             --fg: #e2e4ea;
             --fg-muted: #9499a8;
-            --accent: #3b82f6;
-            --accent-hover: #2563eb;
+            --accent: #10b981;
+            --accent-hover: #059669;
             --border: #2e323e;
             --badge-bg: #303442;
             --code-bg: #252834;
@@ -80,8 +80,8 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             --card-active: #e2e8f0;
             --fg: #0f172a;
             --fg-muted: #64748b;
-            --accent: #2563eb;
-            --accent-hover: #1d4ed8;
+            --accent: #059669;
+            --accent-hover: #047857;
             --border: #cbd5e1;
             --badge-bg: #e2e8f0;
             --code-bg: #e2e8f0;
@@ -100,8 +100,8 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             --card-active: #2f3440;
             --fg: #e2e4ea;
             --fg-muted: #9499a8;
-            --accent: #3b82f6;
-            --accent-hover: #2563eb;
+            --accent: #10b981;
+            --accent-hover: #059669;
             --border: #2e323e;
             --badge-bg: #303442;
             --code-bg: #252834;
@@ -120,8 +120,8 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 --card-active: #e2e8f0;
                 --fg: #0f172a;
                 --fg-muted: #64748b;
-                --accent: #2563eb;
-                --accent-hover: #1d4ed8;
+                --accent: #059669;
+                --accent-hover: #047857;
                 --border: #cbd5e1;
                 --badge-bg: #e2e8f0;
                 --code-bg: #e2e8f0;
@@ -583,6 +583,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         <div class="sidebar-header">
             <div class="header-top-row">
                 <div class="app-title">
+                    <img src="/docs/logo.jpg" alt="Logo" style="height: 24px; width: 24px; border-radius: 6px; object-fit: cover; filter: drop-shadow(0 0 4px var(--accent));" onerror="this.style.display='none'" />
                     <span>Memory Cortex</span>
                 </div>
                 <div class="theme-switcher">

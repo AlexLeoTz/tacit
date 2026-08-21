@@ -176,6 +176,15 @@ class MarkdownPreviewServer:
                     self.send_header("Content-type", "text/plain")
                     self.end_headers()
                     self.wfile.write(b"OK")
+                elif parsed.path == "/docs/logo.jpg":
+                    logo_path = Config.find_project_root() / "docs" / "logo.jpg"
+                    if logo_path.exists():
+                        self.send_response(200)
+                        self.send_header("Content-type", "image/jpeg")
+                        self.end_headers()
+                        self.wfile.write(logo_path.read_bytes())
+                    else:
+                        self.send_error(404, "Not Found")
                 elif parsed.path.startswith("/api/memories/"):
                     node_id = parsed.path.split("/api/memories/")[-1]
                     storage = server_self._resolve_storage(selected_project)
