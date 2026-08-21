@@ -638,15 +638,28 @@ def update(
     console.print("[cyan]Updating Project Memory Cortex (PMC) globally...[/cyan]")
     pip_target = f"git+{git_url}"
 
+    current_root = Config.find_project_root()
+    is_local_dev = (current_root / "setup.py").exists() and (current_root / ".git").exists()
+
     try:
-        # 1. Update the global python package via pip with force-reinstall
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-deps", pip_target]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if is_local_dev:
+            console.print("[yellow]Local development clone detected. Upgrading via git pull and editable install...[/yellow]")
+            try:
+                git_pull = subprocess.run(["git", "pull"], cwd=current_root, capture_output=True, text=True, check=False)
+                if git_pull.returncode != 0:
+                    console.print(f"[yellow]Warning: git pull failed: {git_pull.stderr.strip()}[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not run git pull: {e}[/yellow]")
+
+            cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
+            result = subprocess.run(cmd, cwd=current_root, capture_output=True, text=True, check=False)
+        else:
+            # Update the global python package via pip with force-reinstall and no-cache-dir
+            cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-cache-dir", "--no-deps", pip_target]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode != 0:
-            # Fallback if in local git repo directory
-            current_root = Config.find_project_root()
-            if (current_root / "setup.py").exists():
+            if not is_local_dev and (current_root / "setup.py").exists():
                 console.print("[yellow]Remote pip install returned error, upgrading via local editable mode...[/yellow]")
                 subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=current_root, check=False)
             else:
