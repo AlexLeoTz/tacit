@@ -31,6 +31,72 @@ Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, Ope
 
 ---
 
+### Real-World Example: Solving "AI Amnesia" in Practice
+
+Imagine starting a **fresh, blank chat session** (zero chat history, zero vector database setup) and asking your AI coding agent:
+> *"Why did we remove the SPA navigation for staff login?"*
+
+Without PMC, the agent is blind. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
+
+#### 1. Bootstrapping Context
+At the start of the session, the agent calls `memory_context(timeframe="week")` to load recent workspace decisions into its system context:
+```json
+{
+  "Decisions": [
+    { "id": "9385134c", "title": "Decision: Fixed staff login hanging issue by removing SPA na" },
+    { "id": "54bd72c1", "title": "Decision: Fixed email verification subject showing literal $" }
+  ]
+}
+```
+
+#### 2. Targeted Querying
+The agent performs a quick search using `memory_search(query="staff login")` to locate the exact node:
+```json
+{
+  "id": "9385134c-eb52-4d70-824a-a21b23033df7",
+  "title": "Decision: Fixed staff login hanging issue by removing SPA na",
+  "tags": ["auth", "staff-management", "bugfix"]
+}
+```
+
+#### 3. Fetching Node & Lineage
+The agent queries the full memory node via `memory_get(node_id="9385134c-eb52-4d70-824a-a21b23033df7")`, retrieving the complete content and its dynamic Merkle DAG lineage:
+```text
+==================================================
+MEMORY NODE: 9385134c-eb52-4d70-824a-a21b23033df7
+Type: DECISION | Impact: MEDIUM | Status: active
+Recorded: 2026-08-21 21:14:11 E. Africa Standard Time by ai-agent
+Title: Decision: Fixed staff login hanging issue by removing SPA na
+==================================================
+
+CONTENT:
+Fixed staff login hanging issue by removing SPA navigate:true from redirectIntended in login Volt component, forcing a full page reload (required for subdomain domain switching in production). Fixed 500 error on staff deletion by refactoring StaffManagementComponent to use the model's official cleanupAndDelete() method, preventing database foreign key constraint violations from related UserProfiles and other resources.
+
+TAXONOMY & LINEAGE:
+Tags: auth, staff-management, bugfix
+Scope: /api/app/Livewire/StaffManagementComponent.php, /api/resources/views/livewire/auth/login.blade.php
+Parents: 54bd72c1-3a34-4895-b233-0d7dde557eb4
+
+DECISION TREE / CAUSALITY:
+CAUSAL ANCESTORS (Foundations):
+  └── [decision] Decision: Implemented dynamic page-level permissions mapping (`a6a9dc1e`)
+  └── [decision] Decision: Created a dedicated Staff Management page (`da20d017`)
+  └── [decision] Decision: Updated the English and Swahili translation dictio (`5e839b22`)
+  └── [decision] Decision: Fixed email verification subject showing literal $ (`54bd72c1`)
+==================================================
+```
+
+#### 4. The Agent's Answer
+Equipped with this structural and historical background, the agent immediately constructs a correct answer with no hallucination:
+> We removed the SPA navigation (`navigate: true`) for the staff login redirect in `login.blade.php:43` to resolve a hanging/freezing issue during authentication.
+> 
+> **Why it was necessary:**
+> * **Subdomain Switching**: Logging in as staff redirects between different production subdomains.
+> * **Livewire SPA limits**: Livewire's `navigate: true` attempts to load redirects via AJAX, which hangs when crossing subdomain/domain boundaries.
+> * **Solution**: Removing it forces a standard browser redirect and full page reload, ensuring a clean session handoff.
+
+---
+
 ## Architecture Overview
 
 ```
