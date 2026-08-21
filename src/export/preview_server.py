@@ -399,18 +399,8 @@ class MarkdownPreviewServer:
         try:
             from rich.console import Console
             console = Console()
-            logo_art = """
-              [cyan].-''''-.[/cyan]
-            [cyan]/  __[/cyan][magenta]__  \\[/magenta]
-     [cyan]\\\\     |  (o)[/cyan][magenta](o)  |     /[/magenta]
-      [cyan]\\\\    |     [/cyan][magenta]__     |    /[/magenta]
-   [cyan]\\\\   \\\\    \\\\   [/cyan][magenta](__)   /    /   /[/magenta]
-    [cyan]\\\\   \\\\    `[/cyan][magenta]--------'    /   /[/magenta]
-     [cyan]\\\\   `[/cyan][magenta]----------------'   /[/magenta]
-      [cyan]`[/cyan][magenta]----------------------'[/magenta]
-             [bold cyan]Project[/bold cyan] [bold magenta]Memory[/bold magenta] [bold white]Cortex[/bold white]
-            """
-            console.print(logo_art)
+            console.print("\n[bold cyan]🐙 Project Memory Cortex (PMC) Server[/bold cyan]")
+            console.print("[dim]Persistent, immutable, timestamped institutional memory[/dim]\n")
         except Exception:
             pass
 
