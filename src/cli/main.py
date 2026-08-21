@@ -65,7 +65,10 @@ def get_storage(project: Optional[str] = None) -> MemoryStorage:
 def init(
     directory: Optional[str] = typer.Option(
         None, "--dir", "-d", help="Custom project directory for memory storage"
-    )
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force overwrite existing rule files"
+    ),
 ):
     """Initialize project memory database and directories for the current (or specified) project."""
     target_root = Config.find_project_root(directory)
@@ -94,12 +97,12 @@ You are connected to Project Memory Cortex to preserve engineering decisions acr
     # 1. Antigravity rule
     agy_rule = target_root / ".agents" / "rules" / "project_memory.md"
     agy_rule.parent.mkdir(parents=True, exist_ok=True)
-    if not agy_rule.exists():
+    if force or not agy_rule.exists():
         agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Project Memory Cortex\n---\n\n{rule_content}", encoding="utf-8")
 
     # 2. Cursor rules
     cursor_rule = target_root / ".cursorrules"
-    if not cursor_rule.exists():
+    if force or not cursor_rule.exists():
         cursor_rule.write_text(rule_content, encoding="utf-8")
 
     console.print(
@@ -650,32 +653,16 @@ def update(
                 console.print(f"[red]Update failed: {result.stderr}[/red]")
                 return
 
-        # 2. Refresh rules in current workspace
+        # 2. Refresh rules in current workspace using a fresh process of the newly updated code
+        console.print("[cyan]Refreshing local workspace agent rules...[/cyan]")
         current_root = Config.find_project_root()
-        rule_content = """# Autonomous Institutional Memory Rules (PMC)
-
-You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
-
-## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
-2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
-   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
-   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
-   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
-3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
-   - At the conclusion of any non-trivial coding task, ask yourself:
-     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
-   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`).
-   - If NO (e.g., routine refactor or typo fix), do not pollute project memory.
-"""
-        agy_rule = current_root / ".agents" / "rules" / "project_memory.md"
-        if agy_rule.exists() or (current_root / ".agents").exists():
-            agy_rule.parent.mkdir(parents=True, exist_ok=True)
-            agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Project Memory Cortex\n---\n\n{rule_content}", encoding="utf-8")
-
-        cursor_rule = current_root / ".cursorrules"
-        if cursor_rule.exists():
-            cursor_rule.write_text(rule_content, encoding="utf-8")
+        try:
+            subprocess.run([sys.executable, "-m", "src.cli.main", "init", "--force"], check=False)
+        except Exception:
+            try:
+                subprocess.run(["pmc", "init", "--force"], check=False)
+            except Exception:
+                pass
 
         console.print(Panel.fit(
             f"[bold green]Project Memory Cortex Successfully Updated![/bold green]\n"
