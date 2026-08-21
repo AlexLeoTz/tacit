@@ -285,6 +285,30 @@ pmc tree
 pmc lineage 4a9f
 ```
 
+#### Real-World Lineage Example:
+To see PMC's lineage tracing in action, running `pmc lineage 54bd72c1` outputs the local decision dependency structure:
+
+```text
+┌─────────────────────────────── Memory Causal Lineage ────────────────────────────────┐
+│ Causal Lineage for: Decision: Fixed email verification subject showing literal $    │
+│                                                                                      │
+│ Ancestors (Causal Foundations):                                                      │
+│   └──  Decision: Implemented dynamic page-level permissions mapping (a6a9dc1e)       │
+│   └──  Decision: Created a dedicated Staff Management page (da20d017)                │
+│   └──  Decision: Updated the English and Swahili translation dictio (5e839b22)       │
+│                                                                                      │
+│ ► Target Node:  Decision: Fixed email verification subject showing literal $ (54bd)  │
+│                                                                                      │
+│ Descendants (Derived Decisions/Hacks):                                               │
+│   └──  Decision: Fixed staff login hanging issue by removing SPA na (9385134c)       │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Value for Developers & AI Agents**:
+Instead of reading through unrelated commit logs or forgetting why a fix was made, you instantly trace the context: the **Staff Login Navigation Fix (`9385134c`)** was built on top of the **Email Verification Fix (`54bd72c1`)**, which was itself caused by variables introduced in the **Translation Dictionaries (`5e839b22`)**, the **Staff Page (`da20d017`)**, and the **Permissions Mapping (`a6a9dc1e`)**.
+
+---
+
 ### Pre-Flight Semantic Auto-Linking
 
 When recording a memory (`pmc remember` or `memory_add`), PMC checks for parent relationships. If no parent links are supplied, the core runs a **pre-flight semantic similarity lookup** on existing memories. If a highly relevant context node is found, it automatically links it as a parent node, ensuring DAG continuity without manual intervention.
