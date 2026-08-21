@@ -83,6 +83,9 @@ cd project-memory-cortext
 pip install -e .
 ```
 
+> [!IMPORTANT]
+> **Windows Installation/Update Note**: Before running `pip install -e .` or `pmc update` on Windows, make sure all running PMC instances (such as the MCP server running inside Cursor/Claude Desktop, or the `pmc serve` preview server) are stopped. Windows locks active `.exe` binaries, which will cause the installer to crash with a `PermissionError`.
+
 After installation, the **`pmc`** and **`project-memory`** CLI commands will be available globally in any terminal and in any project directory on your computer.
 
 ---

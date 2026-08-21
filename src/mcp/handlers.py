@@ -60,6 +60,12 @@ class MemoryMCPHandlers:
     ) -> Dict[str, Any]:
         """Create and store an immutable memory node in target project storage."""
         storage = self._resolve_storage(project)
+        tags = tags or []
+        scope = scope or []
+        parents = parents or []
+        related = related or []
+        metadata = metadata or {}
+
         # Pre-flight check: If agent didn't provide parents, check for existing similar memories
         linked_hint = ""
         if not parents:
