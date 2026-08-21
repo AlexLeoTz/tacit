@@ -396,6 +396,24 @@ class MarkdownPreviewServer:
         monitor_thread = threading.Thread(target=self._monitor_changes, daemon=True)
         monitor_thread.start()
 
+        try:
+            from rich.console import Console
+            console = Console()
+            logo_art = """
+              [cyan].-''''-.[/cyan]
+            [cyan]/  __[/cyan][magenta]__  \\[/magenta]
+     [cyan]\\\\     |  (o)[/cyan][magenta](o)  |     /[/magenta]
+      [cyan]\\\\    |     [/cyan][magenta]__     |    /[/magenta]
+   [cyan]\\\\   \\\\    \\\\   [/cyan][magenta](__)   /    /   /[/magenta]
+    [cyan]\\\\   \\\\    `[/cyan][magenta]--------'    /   /[/magenta]
+     [cyan]\\\\   `[/cyan][magenta]----------------'   /[/magenta]
+      [cyan]`[/cyan][magenta]----------------------'[/magenta]
+             [bold cyan]Project[/bold cyan] [bold magenta]Memory[/bold magenta] [bold white]Cortex[/bold white]
+            """
+            console.print(logo_art)
+        except Exception:
+            pass
+
         print(f"Project Memory Live Preview running at: http://localhost:{self.port}")
         print(f"WebSocket live-reload active on port: {self.ws_port}")
 
