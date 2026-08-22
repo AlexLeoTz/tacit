@@ -11,6 +11,9 @@
 > **Persistent, immutable, timestamped institutional memory for AI coding agents.**  
 > Survives context window wipes, model switches, compaction, and chat resets.
 
+> [!WARNING]
+> **Development Preview**: Project Memory Cortex is currently in active development. Features, database schemas, and CLI commands may change or break frequently. Please back up your memories before upgrading.
+
 ---
 
 ## Motivation and The Problem It Solves
