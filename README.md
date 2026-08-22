@@ -192,7 +192,7 @@ pip install -e .
 ---
 
 ### Step 2: Register MCP server globally
-Run the registration command for your AI editor of choice:
+This registration command modifies your editor's settings globally. It can be run from any folder or terminal directory:
 ```bash
 # For Antigravity CLI
 pmc install-mcp --client antigravity
@@ -210,7 +210,7 @@ pmc install-mcp --client cursor
 ---
 
 ### Step 3: Initialize the project memory directory
-Navigate to your specific project workspace directory (e.g. `cd /path/to/my-project`) and initialize the database and local agent instructions:
+Navigate to your specific project workspace directory (e.g. `cd /path/to/my-project`) and initialize the database. **This command must be run inside your project root directory**:
 ```bash
 pmc init
 ```
@@ -218,7 +218,7 @@ pmc init
 ---
 
 ### Step 4: Run the live markdown preview server
-Start the web dashboard to search, view, and insert project memories directly:
+Start the web dashboard to search, view, and insert project memories directly. **This command must be run inside your project root directory**:
 ```bash
 pmc serve
 ```

@@ -51,41 +51,41 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <style>
         /* Base / Dark Theme (Default) */
         :root {
-            --bg: #121316;
-            --sidebar-bg: #18191e;
-            --card-bg: #202229;
-            --card-hover: #272a33;
-            --card-active: #2f3440;
-            --fg: #e2e4ea;
-            --fg-muted: #9499a8;
-            --accent: #10b981;
-            --accent-hover: #059669;
-            --border: #2e323e;
-            --badge-bg: #303442;
-            --code-bg: #252834;
-            --pre-bg: #1a1c23;
-            --success: #10b981;
-            --error: #ef4444;
-            --danger-bg: #7f1d1d;
-            --danger-hover: #991b1b;
-            --danger-text: #fca5a5;
+            --bg: #0a0a0a;
+            --sidebar-bg: #121212;
+            --card-bg: #161616;
+            --card-hover: #222222;
+            --card-active: #2a2a2a;
+            --fg: #ffffff;
+            --fg-muted: #8f8f8f;
+            --accent: #ffffff;
+            --accent-hover: #e5e5e5;
+            --border: #262626;
+            --badge-bg: #1a1a1a;
+            --code-bg: #1e1e1e;
+            --pre-bg: #141414;
+            --success: #ffffff;
+            --error: #ff4444;
+            --danger-bg: #2d1616;
+            --danger-hover: #401f1f;
+            --danger-text: #ff8888;
         }
 
         /* Light Theme */
         [data-theme="light"] {
-            --bg: #f8fafc;
-            --sidebar-bg: #f1f5f9;
+            --bg: #ffffff;
+            --sidebar-bg: #f5f5f5;
             --card-bg: #ffffff;
-            --card-hover: #f8fafc;
-            --card-active: #e2e8f0;
-            --fg: #0f172a;
-            --fg-muted: #64748b;
-            --accent: #059669;
-            --accent-hover: #047857;
-            --border: #cbd5e1;
-            --badge-bg: #e2e8f0;
-            --code-bg: #e2e8f0;
-            --pre-bg: #f1f5f9;
+            --card-hover: #fafafa;
+            --card-active: #eeeeee;
+            --fg: #000000;
+            --fg-muted: #707070;
+            --accent: #000000;
+            --accent-hover: #222222;
+            --border: #e5e5e5;
+            --badge-bg: #f0f0f0;
+            --code-bg: #f0f0f0;
+            --pre-bg: #fafafa;
             --danger-bg: #fee2e2;
             --danger-hover: #fecaca;
             --danger-text: #dc2626;
@@ -93,39 +93,39 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
         /* Explicit Dark Theme */
         [data-theme="dark"] {
-            --bg: #121316;
-            --sidebar-bg: #18191e;
-            --card-bg: #202229;
-            --card-hover: #272a33;
-            --card-active: #2f3440;
-            --fg: #e2e4ea;
-            --fg-muted: #9499a8;
-            --accent: #10b981;
-            --accent-hover: #059669;
-            --border: #2e323e;
-            --badge-bg: #303442;
-            --code-bg: #252834;
-            --pre-bg: #1a1c23;
-            --danger-bg: #7f1d1d;
-            --danger-hover: #991b1b;
-            --danger-text: #fca5a5;
+            --bg: #0a0a0a;
+            --sidebar-bg: #121212;
+            --card-bg: #161616;
+            --card-hover: #222222;
+            --card-active: #2a2a2a;
+            --fg: #ffffff;
+            --fg-muted: #8f8f8f;
+            --accent: #ffffff;
+            --accent-hover: #e5e5e5;
+            --border: #262626;
+            --badge-bg: #1a1a1a;
+            --code-bg: #1e1e1e;
+            --pre-bg: #141414;
+            --danger-bg: #2d1616;
+            --danger-hover: #401f1f;
+            --danger-text: #ff8888;
         }
 
         @media (prefers-color-scheme: light) {
             [data-theme="system"] {
-                --bg: #f8fafc;
-                --sidebar-bg: #f1f5f9;
+                --bg: #ffffff;
+                --sidebar-bg: #f5f5f5;
                 --card-bg: #ffffff;
-                --card-hover: #f8fafc;
-                --card-active: #e2e8f0;
-                --fg: #0f172a;
-                --fg-muted: #64748b;
-                --accent: #059669;
-                --accent-hover: #047857;
-                --border: #cbd5e1;
-                --badge-bg: #e2e8f0;
-                --code-bg: #e2e8f0;
-                --pre-bg: #f1f5f9;
+                --card-hover: #fafafa;
+                --card-active: #eeeeee;
+                --fg: #000000;
+                --fg-muted: #707070;
+                --accent: #000000;
+                --accent-hover: #222222;
+                --border: #e5e5e5;
+                --badge-bg: #f0f0f0;
+                --code-bg: #f0f0f0;
+                --pre-bg: #fafafa;
                 --danger-bg: #fee2e2;
                 --danger-hover: #fecaca;
                 --danger-text: #dc2626;
@@ -583,7 +583,11 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         <div class="sidebar-header">
             <div class="header-top-row">
                 <div class="app-title">
-                    <img src="/docs/logo.jpg" alt="Logo" style="height: 24px; width: 24px; border-radius: 6px; object-fit: cover; filter: drop-shadow(0 0 4px var(--accent));" onerror="this.style.display='none'" />
+                    <svg viewBox="0 0 24 24" width="20" height="20" style="fill: none; stroke: var(--fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-right: 2px;">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                        <polyline points="2 17 12 22 22 17" />
+                        <polyline points="2 12 12 17 22 12" />
+                    </svg>
                     <span>Memory Cortex</span>
                 </div>
                 <div class="theme-switcher">
@@ -726,8 +730,10 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
                     <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                         <div style="flex: 1;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Parent Node IDs (Causal Ancestors, comma separated)</label>
-                            <input type="text" id="add-parents" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. a6a9dc1e, da20d017 (Optional)">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Parent Node IDs (Select multiple holding Ctrl/Cmd)</label>
+                            <select id="add-parents-select" multiple style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; height: 60px;">
+                                <!-- Dynamic options loaded on open -->
+                            </select>
                         </div>
                         <div style="width: 150px;">
                             <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Impact</label>
@@ -1054,6 +1060,17 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         }
 
         function openAddMemoryModal() {
+            const selectEl = document.getElementById('add-parents-select');
+            selectEl.innerHTML = '';
+            
+            // Populate select dropdown with existing memories
+            memories.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = `${m.title || m.summary || m.content.substring(0, 30)} [${m.id.substring(0, 8)}]`;
+                selectEl.appendChild(opt);
+            });
+
             document.getElementById('add-memory-modal').classList.add('active');
         }
 
@@ -1079,7 +1096,10 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             
             const tags = document.getElementById('add-tags').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
             const scope = document.getElementById('add-scope').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
-            const parents = document.getElementById('add-parents').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            
+            const selectEl = document.getElementById('add-parents-select');
+            const parents = Array.from(selectEl.selectedOptions).map(opt => opt.value);
+            
             const impact = document.getElementById('add-impact').value;
 
             const payload = {
