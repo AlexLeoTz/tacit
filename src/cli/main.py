@@ -596,6 +596,8 @@ def install_mcp(
             config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
         else:
             config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+    elif client.lower() in ("claude-code", "claude_code"):
+        config_path = Path.home() / ".claude.json"
     elif client.lower() == "cursor":
         if sys.platform == "win32":
             config_path = Path(os.environ.get("APPDATA", "")) / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
@@ -604,7 +606,7 @@ def install_mcp(
         else:
             config_path = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
     else:
-        console.print(f"[red]Unknown client '{client}'. Supported options: antigravity, agy, claude, cursor, print.[/red]")
+        console.print(f"[red]Unknown client '{client}'. Supported options: antigravity, agy, claude, claude-code, cursor, print.[/red]")
         return
 
     try:

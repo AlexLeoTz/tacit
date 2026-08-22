@@ -172,10 +172,11 @@ Equipped with this structural and historical background, the agent immediately c
 
 ---
 
-## 1. Installation
+## 1. Quick Start & Installation
 
-Install the package from the source:
+To get Project Memory Cortex running in your environment, execute the following commands in sequence:
 
+### Step 1: Install PMC from source
 ```bash
 # Clone the repository
 git clone https://github.com/AlexLeoTz/project-memory-cortext.git
@@ -186,33 +187,47 @@ pip install -e .
 ```
 
 > [!IMPORTANT]
-> **Windows Installation/Update Note**: Before running `pip install -e .` or `pmc update` on Windows, make sure all running PMC instances (such as the MCP server running inside Cursor/Claude Desktop, or the `pmc serve` preview server) are stopped. Windows locks active `.exe` binaries, which will cause the installer to crash with a `PermissionError`.
+> **Windows Installation/Update Note**: Before running `pip install -e .` or `pmc update` on Windows, make sure all running PMC instances (such as Cursor, Claude Desktop, or `pmc serve`) are stopped. Windows locks active `.exe` binaries, which will cause the installer to crash with a `PermissionError`.
 
-After installation, the **`pmc`** and **`project-memory`** CLI commands will be available globally in any terminal and in any project directory on your computer.
+---
+
+### Step 2: Register MCP server globally
+Run the registration command for your AI editor of choice:
+```bash
+# For Antigravity CLI
+pmc install-mcp --client antigravity
+
+# For Claude Desktop
+pmc install-mcp --client claude
+
+# For Claude Code (Terminal CLI)
+pmc install-mcp --client claude-code
+
+# For Cursor
+pmc install-mcp --client cursor
+```
+
+---
+
+### Step 3: Initialize the project memory directory
+Navigate to your specific project workspace directory (e.g. `cd /path/to/my-project`) and initialize the database and local agent instructions:
+```bash
+pmc init
+```
+
+---
+
+### Step 4: Run the live markdown preview server
+Start the web dashboard to search, view, and insert project memories directly:
+```bash
+pmc serve
+```
 
 ---
 
 ## 2. AI Agent Integration (MCP Setup)
 
 Project Memory Cortex runs as a local MCP server that automatically detects whichever project directory your coding harness has open.
-
-### A. One-Click Automatic Setup
-
-Run the built-in installer for your favorite AI editor:
-
-```bash
-# 1. Antigravity CLI
-pmc install-mcp --client antigravity
-
-# 2. Claude
-pmc install-mcp --client claude
-
-# 3. Cursor
-pmc install-mcp --client cursor
-
-# 4. View JSON snippet without writing
-pmc install-mcp --client print
-```
 
 ---
 
