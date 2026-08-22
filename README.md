@@ -57,7 +57,7 @@ By explicitly linking parents and children, PMC builds a mathematical causality 
 Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
 > *"Why did we change the database pool size and add connection timeouts?"*
 
-Without PMC, the agent is blind. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
+Without PMC, the agent is blind—you would have to manually explain to it what it knew in the previous session. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
 
 #### 1. Bootstrapping Context
 At the start of the session, the agent calls `memory_context(timeframe="week")` to load recent workspace decisions into its system context:
