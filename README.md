@@ -33,6 +33,9 @@ Coding agents/harnesses (Claude, Cursor, Antigravity, Deepseek-Harness, Codex) p
 * **Bootstrapping**: Agents query recent context on session startup to align with past design decisions.
 * **Local Web Dashboard**: A live-reloading UI to search, audit, filter, and insert project memories directly.
 
+> [!NOTE]
+> **Why Local Ownership Matters**: You can start a completely fresh session or migrate to a brand new coding harness, and your assistant will still instantly access all engineering decisions and institutional knowledge recorded since the first day of development. While model intelligence lives in a third-party cloud, its contributions to your project's tacit knowledge stay locally owned by your team.
+
 ---
 
 ### Core Concepts: Tacit Knowledge & Causal Node DAGs
