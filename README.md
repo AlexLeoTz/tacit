@@ -26,11 +26,12 @@ Coding agents/harnesses (Claude, Cursor, Antigravity, Deepseek-Harness, Codex) p
 4. **Scattered Tacit Knowledge**: Critical deployment commands, environment quirks, and architectural caveats live only in chat histories rather than in an indexed, verifiable repository.
 
 ### What is Project Memory Cortex?
-**Project Memory Cortex** is a content-addressed, cryptographic **institutional memory layer** for AI software engineers. It runs locally as a MCP server and embeds into your existing developer workflow:
-- **Immutable Knowledge DAG**: Every architectural decision, setup command, hack, error fix, and design constraint is stored with a cryptographic SHA-256 hash and Merkle root.
-- **Fast Full-Text Retrieval (FTS5 + BM25)**: Agents instantly recall relevant decisions using natural language search.
-- **Bootstrapping on Session Start**: Agents automatically query past context on session startup (`memory_context`) to immediately align with historical design decisions.
-- **Human-in-the-Loop Dashboard**: Developers get a live-reloading visual web interface to explore, filter, audit, and clean project knowledge.
+**Project Memory Cortex** is a local institutional memory layer for AI software engineers. It works like Git, but for project decisions instead of source code. It runs locally as a Model Context Protocol (MCP) server, storing memories in an SQLite database for sub-millisecond search, and syncs them to plain Markdown files in your repository.
+
+* **Immutable Knowledge DAG**: Every decision, command, hack, and fix is stored with a SHA-256 content hash and a Merkle root calculated from its parent nodes, creating a cryptographic audit trail.
+* **Fast Full-Text Retrieval**: Utilizes SQLite FTS5 for sub-millisecond keyword and BM25 searches.
+* **Bootstrapping**: Agents query recent context on session startup to align with past design decisions.
+* **Local Web Dashboard**: A live-reloading UI to search, audit, filter, and insert project memories directly.
 
 ---
 
@@ -44,14 +45,14 @@ To get the most value out of PMC, both developers and AI agents must understand 
 > * **No Source Code Files**: PMC does not index your repository's raw codebase files.
 > 
 > **What PMC DOES Store (Tacit Knowledge)**:
-> PMC exclusively records **Tacit / Institutional Knowledge** — the undocumented "why" behind your code. This includes architectural constraints, tricky workarounds (hacks), specific environment dependencies, critical operational commands, and resolved bug caveats.
+> PMC exclusively records **Tacit / Institutional Knowledge**: the undocumented "why" behind your code. This includes architectural constraints, tricky workarounds (hacks), specific environment dependencies, critical operational commands, and resolved bug caveats.
 
 #### The Parent-Child Node Relationship
 PMC structures knowledge as a **Directed Acyclic Graph (DAG)** of **Memory Nodes**:
 * **Parent Nodes (Foundations)**: Past decisions, patterns, or limitations that set the initial context (e.g., *"Migrated to an async backend request pipeline"*).
 * **Child Nodes (Derived Decisions)**: Subsequent decisions, hotfixes, or workarounds triggered because of a parent context (e.g., *"Resolved connection pool exhaustion by raising limit to 30"*).
 
-By explicitly linking parents and children, PMC builds a mathematical causality tree. When an agent queries a decision, PMC doesn't just retrieve the node — it walks up the tree to tell the agent the entire ancestral history.
+By explicitly linking parents and children, PMC builds a mathematical causality tree. When an agent queries a decision, PMC doesn't just retrieve the node, but walks up the tree to tell the agent the entire ancestral history.
 
 ---
 
@@ -60,7 +61,7 @@ By explicitly linking parents and children, PMC builds a mathematical causality 
 Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
 > *"Why did we change the database pool size and add connection timeouts?"*
 
-Without PMC, the agent is blind—you would have to manually explain to it what it knew in the previous session. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
+Without PMC, the agent is blind. You would have to manually explain to it what it knew in the previous session. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
 
 #### 1. Bootstrapping Context
 At the start of the session, the agent calls `memory_context(timeframe="week")` to load recent workspace decisions into its system context:
