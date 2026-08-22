@@ -44,7 +44,7 @@ At the start of the session, the agent calls `memory_context(timeframe="week")` 
 {
   "Decisions": [
     { "id": "9385134c", "title": "Decision: Fixed staff login hanging issue by removing SPA na" },
-    { "id": "54bd72c1", "title": "Decision: Fixed email verification subject showing literal $" }
+    { "id": "54bd72c1", "title": "Decision: Fixed secure session cookie configurations" }
   ]
 }
 ```
@@ -70,34 +70,30 @@ Title: Decision: Fixed staff login hanging issue by removing SPA na
 ==================================================
 
 CONTENT:
-Fixed staff login hanging issue by removing SPA navigate:true from redirectIntended in
-login Volt component, forcing a full page reload (required for subdomain domain switching in production).
-Fixed 500 error on staff deletion by refactoring StaffManagementComponent
-to use the model's official cleanupAndDelete() method, 
-preventing database foreign key constraint violations from related UserProfiles and other resources.
+Removed SPA-based routing/navigation for staff redirects in login components. Staff logins redirect users to a separate admin subdomain (e.g., admin.domain.com). SPA client-side routers attempt to load these redirects via background AJAX requests, which fail due to browser cross-origin (CORS) security policies, hanging the interface. Using standard browser navigation forces a full page reload and successfully transitions across subdomains.
 
 TAXONOMY & LINEAGE:
 Tags: auth, staff-management, bugfix
-Scope: /api/app/Livewire/StaffManagementComponent.php, /api/resources/views/livewire/auth/login.blade.php
+Scope: /src/components/StaffDashboard.js, /src/auth/login.html
 Parents: 54bd72c1-3a34-4895-b233-0d7dde557eb4
 
 DECISION TREE / CAUSALITY:
 CAUSAL ANCESTORS (Foundations):
-  └── [decision] Decision: Implemented dynamic page-level permissions mapping (`a6a9dc1e`)
-  └── [decision] Decision: Created a dedicated Staff Management page (`da20d017`)
-  └── [decision] Decision: Updated the English and Swahili translation dictio (`5e839b22`)
-  └── [decision] Decision: Fixed email verification subject showing literal $ (`54bd72c1`)
+  └── [decision] Decision: Implemented dynamic admin subdomain routing rules (`a6a9dc1e`)
+  └── [decision] Decision: Created a dedicated staff portal page (`da20d017`)
+  └── [decision] Decision: Configured CORS settings for internal subdomains (`5e839b22`)
+  └── [decision] Decision: Fixed secure session cookie configurations (`54bd72c1`)
 ==================================================
 ```
 
 #### 4. The Agent's Answer
-Equipped with this structural and historical background, the agent immediately constructs a correct answer with no hallucination:
-> We removed the SPA navigation (`navigate: true`) for the staff login redirect in `login.blade.php:43` to resolve a hanging/freezing issue during authentication.
+Equipped with this structural and historical background, the agent immediately constructs a correct answer with no search latency or hallucination:
+> We removed the SPA navigation (`navigate: true` or client-side router linking) for the staff login redirect to resolve a hanging/freezing issue during authentication.
 > 
 > **Why it was necessary:**
-> * **Subdomain Switching**: Logging in as staff redirects between different production subdomains.
-> * **Livewire SPA limits**: Livewire's `navigate: true` attempts to load redirects via AJAX, which hangs when crossing subdomain/domain boundaries.
-> * **Solution**: Removing it forces a standard browser redirect and full page reload, ensuring a clean session handoff.
+> * **Cross-Subdomain Transitions**: Logging in as staff redirects users to a separate admin subdomain (e.g., `admin.domain.com`).
+> * **SPA Router CORS Limits**: Client-side single-page application routers attempt to fetch redirects asynchronously via background AJAX requests. Browsers block these requests due to cross-origin (CORS) policies, freezing the interface.
+> * **The Solution**: Forcing a standard browser navigation redirect bypasses AJAX routing, trigger a full page reload, and seamlessly transitions the session across subdomains.
 
 ---
 
