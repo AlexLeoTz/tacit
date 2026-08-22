@@ -599,6 +599,14 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 </select>
             </div>
             <input type="text" class="search-box" placeholder="Search memory nodes..." id="search">
+            <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <button class="btn-primary" onclick="openAddMemoryModal()" style="flex: 1; padding: 6px; font-size: 11px; font-weight: 600; border-radius: 6px; background: var(--accent); color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.15s ease;">
+                    <span>+ Add Memory</span>
+                </button>
+                <button class="btn-secondary" onclick="openCliModal()" style="flex: 1; padding: 6px; font-size: 11px; font-weight: 600; border-radius: 6px; background: var(--badge-bg); color: var(--fg); border: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.15s ease;">
+                    <span>ℹ️ CLI Reference</span>
+                </button>
+            </div>
             <div class="filter-chips" id="filter-chips">
                 <div class="filter-chip active" data-type="all">All</div>
                 <div class="filter-chip" data-type="decision">Decision</div>
@@ -662,6 +670,133 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeClearAllModal()">Cancel</button>
                 <button class="btn-confirm-delete" onclick="confirmClearAllMemories()">Clear Everything</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Memory Modal -->
+    <div class="modal-overlay" id="add-memory-modal">
+        <div class="modal-card" style="max-width: 600px; width: 90%;">
+            <div class="modal-title">
+                <span>Record New Tacit Knowledge</span>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+                    PMC stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
+                </p>
+                <form id="add-memory-form" onsubmit="submitNewMemory(event)">
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Title</label>
+                            <input type="text" id="add-title" required style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. Resolved database connection pool exhaustion">
+                        </div>
+                        <div style="width: 150px;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Type</label>
+                            <select id="add-type" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;">
+                                <option value="decision">Decision</option>
+                                <option value="architecture">Architecture</option>
+                                <option value="hack">Hack</option>
+                                <option value="command">Command</option>
+                                <option value="error">Error</option>
+                                <option value="context">Context</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Summary (Short 1-sentence description)</label>
+                        <input type="text" id="add-summary" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="Brief summary of the decision/hack">
+                    </div>
+
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Detailed Content / Rationale</label>
+                        <textarea id="add-content" required style="width: 100%; height: 100px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; resize: vertical; font-family: inherit; line-height: 1.4;" placeholder="Provide the details, reasons, and workarounds."></textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Tags (Comma separated)</label>
+                            <input type="text" id="add-tags" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. database, performance, auth">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Scope (File paths, comma separated)</label>
+                            <input type="text" id="add-scope" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. /src/db.js, /src/server.js">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Parent Node IDs (Causal Ancestors, comma separated)</label>
+                            <input type="text" id="add-parents" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. a6a9dc1e, da20d017 (Optional)">
+                        </div>
+                        <div style="width: 150px;">
+                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Impact</label>
+                            <select id="add-impact" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;">
+                                <option value="high">High</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px;">
+                        <button type="button" class="btn-cancel" onclick="closeAddMemoryModal()">Cancel</button>
+                        <button type="submit" class="btn-confirm-delete" style="background: var(--accent);">Record Memory</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- CLI Reference Modal -->
+    <div class="modal-overlay" id="cli-modal">
+        <div class="modal-card" style="max-width: 600px; width: 90%;">
+            <div class="modal-title">
+                <span>PMC CLI Quick Reference</span>
+            </div>
+            <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
+                <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+                    Use the global <code>pmc</code> binary in any project terminal to record or query decision graphs.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
+                    <div>
+                        <strong style="color: var(--accent);">1. Initialize Cortex Database</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc init</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">2. Record Tacit Knowledge (With Parent Linkage)</strong>
+                        <p style="font-size: 11px; color: var(--fg-muted); margin-top: 2px;">
+                            Always link causal parents to create the ancestry graph:
+                        </p>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px; overflow-x: auto;">pmc remember "Resolved db connection exhaustion by raising pool to 30" \
+  --type decision \
+  --tags "db,performance" \
+  --parents 54bd72c1,a6a9dc1e</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">3. Visualize Causal DAG Tree</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc tree</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">4. Trace Local Lineage (Ancestors & Descendants)</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc lineage &lt;node_id_or_prefix&gt;</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">5. View Full Memory Details</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc get &lt;node_id_or_prefix&gt;</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">6. Delete a Specific Memory Node</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc delete &lt;node_id_or_prefix&gt;</pre>
+                    </div>
+                    <div>
+                        <strong style="color: var(--accent);">7. Global Update & Rule Refresh</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc update</pre>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions" style="margin-top: 15px;">
+                <button class="btn-cancel" onclick="closeCliModal()">Close</button>
             </div>
         </div>
     </div>
@@ -916,6 +1051,68 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                         if (memories.length > 0) loadMemory(memories[0].id);
                     });
             }
+        }
+
+        function openAddMemoryModal() {
+            document.getElementById('add-memory-modal').classList.add('active');
+        }
+
+        function closeAddMemoryModal() {
+            document.getElementById('add-memory-modal').classList.remove('active');
+            document.getElementById('add-memory-form').reset();
+        }
+
+        function openCliModal() {
+            document.getElementById('cli-modal').classList.add('active');
+        }
+
+        function closeCliModal() {
+            document.getElementById('cli-modal').classList.remove('active');
+        }
+
+        function submitNewMemory(event) {
+            event.preventDefault();
+            const title = document.getElementById('add-title').value;
+            const memType = document.getElementById('add-type').value;
+            const summary = document.getElementById('add-summary').value;
+            const content = document.getElementById('add-content').value;
+            
+            const tags = document.getElementById('add-tags').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const scope = document.getElementById('add-scope').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const parents = document.getElementById('add-parents').value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const impact = document.getElementById('add-impact').value;
+
+            const payload = {
+                title: title,
+                type: memType,
+                summary: summary,
+                content: content,
+                tags: tags,
+                scope: scope,
+                parents: parents,
+                impact: impact,
+                author: "human-developer"
+            };
+
+            const proj = selectedProject === 'all' ? 'current' : selectedProject;
+
+            fetch(`/api/memories?project=${encodeURIComponent(proj)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    closeAddMemoryModal();
+                    onProjectChange(selectedProject);
+                } else {
+                    alert(`Failed to add memory: ${data.message || 'unknown error'}`);
+                }
+            })
+            .catch(err => {
+                alert(`Error recording memory: ${err.message}`);
+            });
         }
 
         function openClearAllModal() {

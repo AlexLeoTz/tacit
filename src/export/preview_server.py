@@ -224,6 +224,66 @@ class MarkdownPreviewServer:
                 else:
                     self.send_error(404, "Not Found")
 
+            def do_POST(self):
+                parsed = urllib.parse.urlparse(self.path)
+                params = urllib.parse.parse_qs(parsed.query)
+                selected_project = params.get("project", [None])[0]
+
+                if parsed.path == "/api/memories":
+                    content_length = int(self.headers['Content-Length'])
+                    post_data = self.rfile.read(content_length)
+                    try:
+                        data = json.loads(post_data.decode('utf-8'))
+                        
+                        from ..mcp.handlers import MemoryMCPHandlers
+                        mcp_handlers = MemoryMCPHandlers(server_self.storage)
+                        
+                        content = data.get("content", "")
+                        mem_type = data.get("type", "decision")
+                        title = data.get("title", "")
+                        summary = data.get("summary", "")
+                        tags = data.get("tags", [])
+                        scope = data.get("scope", [])
+                        parents = data.get("parents", [])
+                        related = data.get("related", [])
+                        impact = data.get("impact", "medium")
+                        author = data.get("author", "human-developer")
+                        
+                        if not content:
+                            self.send_response(400)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            self.wfile.write(json.dumps({"success": False, "message": "Content is required."}).encode('utf-8'))
+                            return
+                        
+                        res = mcp_handlers.handle_memory_add(
+                            content=content,
+                            type=mem_type,
+                            summary=summary,
+                            title=title,
+                            tags=tags,
+                            scope=scope,
+                            impact=impact,
+                            parents=parents,
+                            related=related,
+                            author=author,
+                            project=selected_project
+                        )
+                        
+                        self.send_response(200 if res.get("success") else 400)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(res).encode('utf-8'))
+                        if res.get("success"):
+                            server_self._broadcast_update()
+                    except Exception as e:
+                        self.send_response(500)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode('utf-8'))
+                else:
+                    self.send_error(404, "Not Found")
+
             def log_message(self, format, *args):
                 pass  # Suppress default request logging
 

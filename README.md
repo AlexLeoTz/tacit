@@ -31,6 +31,27 @@ Coding agents/harnesses (Claude, Cursor, Antigravity, Codex) possess reasoning c
 
 ---
 
+### Core Concepts: Tacit Knowledge & Causal Node DAGs
+
+To get the most value out of PMC, both developers and AI agents must understand what PMC stores and how it structures knowledge:
+
+> [!IMPORTANT]
+> **What PMC DOES NOT Store**:
+> * **No Chat Histories**: PMC does not log your conversation transcripts or raw prompt histories.
+> * **No Source Code Files**: PMC does not index your repository's raw codebase files.
+> 
+> **What PMC DOES Store (Tacit Knowledge)**:
+> PMC exclusively records **Tacit / Institutional Knowledge** — the undocumented "why" behind your code. This includes architectural constraints, tricky workarounds (hacks), specific environment dependencies, critical operational commands, and resolved bug caveats.
+
+#### The Parent-Child Node Relationship
+PMC structures knowledge as a **Directed Acyclic Graph (DAG)** of **Memory Nodes**:
+* **Parent Nodes (Foundations)**: Past decisions, patterns, or limitations that set the initial context (e.g., *"Migrated to an async backend request pipeline"*).
+* **Child Nodes (Derived Decisions)**: Subsequent decisions, hotfixes, or workarounds triggered because of a parent context (e.g., *"Resolved connection pool exhaustion by raising limit to 30"*).
+
+By explicitly linking parents and children, PMC builds a mathematical causality tree. When an agent queries a decision, PMC doesn't just retrieve the node — it walks up the tree to tell the agent the entire ancestral history.
+
+---
+
 ### Real-World Example: Solving "AI Amnesia" in Practice
 
 Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
@@ -70,7 +91,11 @@ Title: Decision: Resolved database connection pool exhaustion under load
 ==================================================
 
 CONTENT:
-Resolved database connection pool exhaustion by increasing max pool size from 5 to 30, implementing a 5000ms query timeout, and wrapping active transactions in try/finally blocks to guarantee connection release. This prevents HTTP workers from hanging when concurrent database queries spike during high traffic.
+Resolved database connection pool exhaustion by increasing max pool size
+from 5 to 30, implementing a 5000ms query timeout, and wrapping active
+transactions in try/finally blocks to guarantee connection release.
+This prevents HTTP workers from hanging when concurrent database queries
+spike during high traffic.
 
 TAXONOMY & LINEAGE:
 Tags: database, performance, bugfix
@@ -334,22 +359,22 @@ To see PMC's lineage tracing in action, running `pmc lineage 54bd72c1` outputs t
 
 ```text
 ┌─────────────────────────────── Memory Causal Lineage ────────────────────────────────┐
-│ Causal Lineage for: Decision: Fixed email verification subject showing literal $    │
+│ Causal Lineage for: Decision: Enabled transaction middleware for all API writes      │
 │                                                                                      │
 │ Ancestors (Causal Foundations):                                                      │
-│   └──  Decision: Implemented dynamic page-level permissions mapping (a6a9dc1e)       │
-│   └──  Decision: Created a dedicated Staff Management page (da20d017)                │
-│   └──  Decision: Updated the English and Swahili translation dictio (5e839b22)       │
+│   └──  Decision: Migrated backend to async request handling (a6a9dc1e)               │
+│   └──  Decision: Implemented multi-tenant connection mapping (da20d017)              │
+│   └──  Decision: Configured read-replicas for analytics queries (5e839b22)           │
 │                                                                                      │
-│ ► Target Node:  Decision: Fixed email verification subject showing literal $ (54bd)  │
+│ ► Target Node:  Decision: Enabled transaction middleware for all API writes (54bd)   │
 │                                                                                      │
 │ Descendants (Derived Decisions/Hacks):                                               │
-│   └──  Decision: Fixed staff login hanging issue by removing SPA na (9385134c)       │
+│   └──  Decision: Resolved database connection pool exhaustion under load (9385134c)  │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Value for Developers & Coding harness**:
-Instead of reading through unrelated commit logs or forgetting why a fix was made, you instantly trace the context: the **Staff Login Navigation Fix (`9385134c`)** was built on top of the **Email Verification Fix (`54bd72c1`)**, which was itself caused by variables introduced in the **Translation Dictionaries (`5e839b22`)**, the **Staff Page (`da20d017`)**, and the **Permissions Mapping (`a6a9dc1e`)**.
+Instead of reading through unrelated commit logs or forgetting why a fix was made, you instantly trace the context: the **Database Pool Exhaustion Fix (`9385134c`)** was built on top of the **Enabled transaction middleware (`54bd72c1`)**, which was itself caused by components introduced in the **Read-replicas configuration (`5e839b22`)**, the **Multi-tenant mapping (`da20d017`)**, and the **Async backend migration (`a6a9dc1e`)**.
 
 ---
 
