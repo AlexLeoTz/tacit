@@ -34,7 +34,7 @@ Coding agents/harnesses (Claude, Cursor, Antigravity, Codex) possess reasoning c
 ### Real-World Example: Solving "AI Amnesia" in Practice
 
 Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
-> *"Why did we remove the SPA navigation for staff login?"*
+> *"Why did we change the database pool size and add connection timeouts?"*
 
 Without PMC, the agent is blind. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
 
@@ -43,19 +43,19 @@ At the start of the session, the agent calls `memory_context(timeframe="week")` 
 ```json
 {
   "Decisions": [
-    { "id": "9385134c", "title": "Decision: Fixed staff login hanging issue by removing SPA na" },
-    { "id": "54bd72c1", "title": "Decision: Fixed secure session cookie configurations" }
+    { "id": "9385134c", "title": "Decision: Resolved database connection pool exhaustion under load" },
+    { "id": "54bd72c1", "title": "Decision: Enabled transaction middleware for all API writes" }
   ]
 }
 ```
 
 #### 2. Targeted Querying
-The agent performs a quick search using `memory_search(query="staff login")` to locate the exact node:
+The agent performs a quick search using `memory_search(query="database pool")` to locate the exact node:
 ```json
 {
   "id": "9385134c-eb52-4d70-824a-a21b23033df7",
-  "title": "Decision: Fixed staff login hanging issue by removing SPA na",
-  "tags": ["auth", "staff-management", "bugfix"]
+  "title": "Decision: Resolved database connection pool exhaustion under load",
+  "tags": ["database", "performance", "bugfix"]
 }
 ```
 
@@ -66,34 +66,34 @@ The agent queries the full memory node via `memory_get(node_id="9385134c-eb52-4d
 MEMORY NODE: 9385134c-eb52-4d70-824a-a21b23033df7
 Type: DECISION | Impact: MEDIUM | Status: active
 Recorded: 2026-08-21 21:14:11 E. Africa Standard Time by ai-agent
-Title: Decision: Fixed staff login hanging issue by removing SPA na
+Title: Decision: Resolved database connection pool exhaustion under load
 ==================================================
 
 CONTENT:
-Removed SPA-based routing/navigation for staff redirects in login components. Staff logins redirect users to a separate admin subdomain (e.g., admin.domain.com). SPA client-side routers attempt to load these redirects via background AJAX requests, which fail due to browser cross-origin (CORS) security policies, hanging the interface. Using standard browser navigation forces a full page reload and successfully transitions across subdomains.
+Resolved database connection pool exhaustion by increasing max pool size from 5 to 30, implementing a 5000ms query timeout, and wrapping active transactions in try/finally blocks to guarantee connection release. This prevents HTTP workers from hanging when concurrent database queries spike during high traffic.
 
 TAXONOMY & LINEAGE:
-Tags: auth, staff-management, bugfix
-Scope: /src/components/StaffDashboard.js, /src/auth/login.html
+Tags: database, performance, bugfix
+Scope: /src/db/connection.js, /src/middleware/transaction.js
 Parents: 54bd72c1-3a34-4895-b233-0d7dde557eb4
 
 DECISION TREE / CAUSALITY:
 CAUSAL ANCESTORS (Foundations):
-  └── [decision] Decision: Implemented dynamic admin subdomain routing rules (`a6a9dc1e`)
-  └── [decision] Decision: Created a dedicated staff portal page (`da20d017`)
-  └── [decision] Decision: Configured CORS settings for internal subdomains (`5e839b22`)
-  └── [decision] Decision: Fixed secure session cookie configurations (`54bd72c1`)
+  └── [decision] Decision: Migrated backend to async request handling (`a6a9dc1e`)
+  └── [decision] Decision: Implemented multi-tenant connection mapping (`da20d017`)
+  └── [decision] Decision: Configured read-replicas for analytics queries (`5e839b22`)
+  └── [decision] Decision: Enabled transaction middleware for all API writes (`54bd72c1`)
 ==================================================
 ```
 
 #### 4. The Agent's Answer
 Equipped with this structural and historical background, the agent immediately constructs a correct answer with no search latency or hallucination:
-> We removed the SPA navigation (`navigate: true` or client-side router linking) for the staff login redirect to resolve a hanging/freezing issue during authentication.
+> We increased the database connection pool size from 5 to 30 and implemented query timeouts to resolve connection pool exhaustion under high concurrency load.
 > 
 > **Why it was necessary:**
-> * **Cross-Subdomain Transitions**: Logging in as staff redirects users to a separate admin subdomain (e.g., `admin.domain.com`).
-> * **SPA Router CORS Limits**: Client-side single-page application routers attempt to fetch redirects asynchronously via background AJAX requests. Browsers block these requests due to cross-origin (CORS) policies, freezing the interface.
-> * **The Solution**: Forcing a standard browser navigation redirect bypasses AJAX routing, trigger a full page reload, and seamlessly transitions the session across subdomains.
+> * **Async Request Load**: Migrating the backend to async request handling (`a6a9dc1e`) allowed for high concurrency, quickly saturating the original 5-connection pool limit.
+> * **Connection Leak**: The transaction middleware (`54bd72c1`) did not guarantee connection release when write queries failed, leaking active database connections.
+> * **The Solution**: Raising the pool limit to 30 accommodates peak concurrency, adding a 5000ms timeout prevents queries from hanging indefinitely, and wrapping transactions in try/finally blocks guarantees that connections are always returned to the pool.
 
 ---
 
