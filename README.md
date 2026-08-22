@@ -16,7 +16,7 @@
 ## Motivation and The Problem It Solves
 
 ### The Problem: AI Amnesia in Modern Software Engineering
-Coding agents/harnesses (Claude, Cursor, Antigravity, Codex) possess reasoning capabilities, but suffer from **project amnesia**:
+Coding agents/harnesses (Claude, Cursor, Antigravity, Deepseek-Harness, Codex) possess reasoning capabilities, but suffer from **project amnesia**:
 1. **Context Window Limits & Compaction Loss**: As conversations grow, context is summarized or wiped. The agent forgets why a specific architectural decision was made 20 turns ago.
 2. **Session Resets & Model Switching**: Starting a new chat destroys working institutional memory.
 3. **Repeated Mistakes & Bug Regressions**: Agents often re-introduce the same bugs, test the same failed hypotheses, or undo undocumented workarounds ("hacks") previously resolved by another session or teammate.
@@ -127,7 +127,7 @@ Equipped with this structural and historical background, the agent immediately c
 ```
  ┌──────────────────────────────────────────────────────────────────┐
  │                     AI Coding Agents & Editors                   │
- │       (Antigravity, Cursor, Claude Desktop, OpenCode, VSCode)     │
+ │  (Antigravity, Cursor, Claude, Deepseek-Harness, Opencode)       │
  └───────────────────────────────┬──────────────────────────────────┘
                                  │ Standard MCP Protocol (stdio / SSE)
                                  ▼
@@ -279,10 +279,11 @@ pmc remember "docker compose -f docker-compose.prod.yml up -d --build" \
   --type command \
   --tags "deploy,docker,prod"
 
-# Add a workaround / hack
+# Add a workaround / hack (attaching parent nodes to establish causal lineage)
 pmc remember "Temporary fix for SQLite thread lock: set WAL mode and 5s timeout" \
   --type hack \
-  --tags "sqlite,db,bugfix"
+  --tags "sqlite,db,bugfix" \
+  --parents 54bd72c1
 ```
 
 ### Search Memories
