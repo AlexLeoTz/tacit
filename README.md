@@ -216,9 +216,15 @@ pmc install-mcp --client print
 
 ---
 
-### B. Manual MCP Configuration
+### B. Manual MCP Configuration & Client Setup
 
-If you prefer to configure manually, add the following entry to your coding harness client's MCP configuration:
+PMC runs locally as an **STDIO MCP server**: a local background process started and communicated with via standard input/output streams by your AI coding client.
+
+> [!NOTE]
+> **Harness Compatibility**: PMC is thoroughly tested and verified to work natively in **Antigravity CLI**, **DeepSeek Harness**, and **Claude Code**. If you encounter issues running it in other environments, please file a bug report.
+
+#### 1. Claude Code & Claude Desktop
+Add this to your `claude_desktop_config.json` (on Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
 
 ```json
 {
@@ -231,8 +237,41 @@ If you prefer to configure manually, add the following entry to your coding harn
 }
 ```
 
+#### 2. Cursor
+Go to **Settings** -> **Features** -> **MCP**, click **+ Add New MCP Server**, and configure:
+* **Name**: `project-memory`
+* **Type**: `stdio`
+* **Command**: `pmc mcp` (or specify command `pmc` and argument `mcp`)
 
-## 2. Agent Master Prompt & Rules (Automated)
+#### 3. DeepSeek Harness
+DeepSeek Harness loads MCP configurations declaratively. Add this to your project configuration file (e.g. `dsh-config.yaml`):
+
+```yaml
+- id: mcp-project-memory
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: project-memory
+    transport: stdio
+    command: pmc
+    args: ['mcp']
+```
+
+#### 4. ChatGPT Codex
+Add this entry to your local Codex developer configuration layer:
+
+```json
+{
+  "mcpServers": {
+    "project-memory": {
+      "command": "pmc",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+---
+## 3. Agent Master Prompt & Rules (Automated)
 
 **You do not need to manually create rule files.**
 
