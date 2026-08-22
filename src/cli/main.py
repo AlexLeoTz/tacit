@@ -139,6 +139,10 @@ def remember(
     scope_list = [s.strip() for s in scope.split(",") if s.strip()]
     parent_list = [p.strip() for p in parents.split(",") if p.strip()]
 
+    # Validate scope paths exist in target project root
+    from ..core.memory_node import validate_scope_paths
+    validate_scope_paths(scope_list, project)
+
     node = MemoryNode(
         id=str(uuid.uuid4()),
         timestamp=datetime.now().astimezone().timestamp(),

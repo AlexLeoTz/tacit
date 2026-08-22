@@ -77,6 +77,10 @@ class MemoryMCPHandlers:
                 parents = [top_match.id]
                 linked_hint = f" (Auto-linked to related ancestor: '{top_match.title or top_match.summary}' [`{top_match.id[:8]}`])"
 
+        # Validate scope paths exist in target project root
+        from ..core.memory_node import validate_scope_paths
+        validate_scope_paths(scope, project)
+
         node = MemoryNode(
             id=str(uuid.uuid4()),
             timestamp=datetime.now().astimezone().timestamp(),

@@ -86,7 +86,6 @@ class MemoryNode:
                 parents=self.parents,
             )
             object.__setattr__(self, "merkle_root", m_root)
-
     def _calculate_content_hash(self) -> str:
         """Compute expected SHA-256 hash of content fields."""
         return calculate_content_hash(
@@ -168,3 +167,41 @@ class MemoryNode:
             merkle_root=data.get("merkle_root", ""),
             metadata=_safe_json_loads(data.get("metadata"), {}),
         )
+
+
+def validate_scope_paths(scope: List[str], project_path: Optional[str] = None) -> None:
+    """Validate that scope paths exist in the codebase."""
+    if not scope:
+        return
+
+    from ..utils.config import Config
+    from pathlib import Path
+    import os
+
+    # Skip validation if disabled via env var (e.g., for test isolation)
+    if os.environ.get("PMC_NO_PATH_VALIDATION") == "true":
+        return
+
+    try:
+        project_root = Config.find_project_root(project_path)
+    except Exception:
+        project_root = Path.cwd()
+
+    for path_str in scope:
+        # Clean trailing/leading slashes/spaces
+        clean_str = path_str.strip().lstrip("/").rstrip("\\").lstrip("\\").rstrip("/")
+        target_path = Path(clean_str)
+        
+        # Resolve relative to project root
+        full_path = (project_root / target_path).resolve()
+        
+        # Also try relative to current working directory or absolute
+        if not full_path.exists():
+            fallback_path = Path(path_str).resolve()
+            if fallback_path.exists():
+                full_path = fallback_path
+
+        if not full_path.exists():
+            raise ValueError(
+                f"Scope path '{path_str}' does not exist as a file or directory in the codebase."
+            )
