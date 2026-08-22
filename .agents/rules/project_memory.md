@@ -1,10 +1,20 @@
 ---
 trigger: always_on
-description: Institutional memory guideline using Project Memory Cortex MCP tools
+description: Institutional memory guideline using Project Memory Cortex
 ---
 
-# Project Memory Rules
+# Autonomous Institutional Memory Rules (PMC)
 
-Whenever you make key architectural decisions, discover bugs, fix tricky errors, or execute critical deploy/setup commands in this project:
-1. **Record key decisions**: Call `memory_add` with type `decision`, `architecture`, `hack`, `command`, or `error`.
-2. **Context on session start**: Check `memory_context` to recall institutional memory and past design decisions.
+You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
+
+## Mandatory Agent Workflow:
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
+   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
+   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
+   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
+   - At the conclusion of any non-trivial coding task, ask yourself:
+     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, `error`).
+   - If NO (e.g., routine refactor or typo fix), do not pollute project memory.

@@ -16,14 +16,14 @@
 ## Motivation and The Problem It Solves
 
 ### The Problem: AI Amnesia in Modern Software Engineering
-Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, OpenCode) possess reasoning capabilities, but suffer from **project amnesia**:
+Coding agents/harnesses (Claude, Cursor, Antigravity, Codex) possess reasoning capabilities, but suffer from **project amnesia**:
 1. **Context Window Limits & Compaction Loss**: As conversations grow, context is summarized or wiped. The agent forgets why a specific architectural decision was made 20 turns ago.
-2. **Session Resets & Model Switching**: Starting a new chat or switching between models (e.g. Gemini, Claude 3.7, GPT-4o) destroys working institutional memory.
+2. **Session Resets & Model Switching**: Starting a new chat destroys working institutional memory.
 3. **Repeated Mistakes & Bug Regressions**: Agents often re-introduce the same bugs, test the same failed hypotheses, or undo undocumented workarounds ("hacks") previously resolved by another session or teammate.
 4. **Scattered Tacit Knowledge**: Critical deployment commands, environment quirks, and architectural caveats live only in chat histories rather than in an indexed, verifiable repository.
 
 ### What is Project Memory Cortex?
-**Project Memory Cortex** is a content-addressed, cryptographic **institutional memory layer** for AI software engineers. It runs locally as a Model Context Protocol (MCP) server and embeds into your existing developer workflow:
+**Project Memory Cortex** is a content-addressed, cryptographic **institutional memory layer** for AI software engineers. It runs locally as a MCP server and embeds into your existing developer workflow:
 - **Immutable Knowledge DAG**: Every architectural decision, setup command, hack, error fix, and design constraint is stored with a cryptographic SHA-256 hash and Merkle root.
 - **Fast Full-Text Retrieval (FTS5 + BM25)**: Agents instantly recall relevant decisions using natural language search.
 - **Bootstrapping on Session Start**: Agents automatically query past context on session startup (`memory_context`) to immediately align with historical design decisions.
@@ -33,7 +33,7 @@ Large Language Models (LLMs) and coding agents (Claude, Cursor, Antigravity, Ope
 
 ### Real-World Example: Solving "AI Amnesia" in Practice
 
-Imagine starting a **fresh, blank chat session** (zero chat history, zero vector database setup) and asking your AI coding agent:
+Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
 > *"Why did we remove the SPA navigation for staff login?"*
 
 Without PMC, the agent is blind. With PMC, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
@@ -70,7 +70,11 @@ Title: Decision: Fixed staff login hanging issue by removing SPA na
 ==================================================
 
 CONTENT:
-Fixed staff login hanging issue by removing SPA navigate:true from redirectIntended in login Volt component, forcing a full page reload (required for subdomain domain switching in production). Fixed 500 error on staff deletion by refactoring StaffManagementComponent to use the model's official cleanupAndDelete() method, preventing database foreign key constraint violations from related UserProfiles and other resources.
+Fixed staff login hanging issue by removing SPA navigate:true from redirectIntended in
+login Volt component, forcing a full page reload (required for subdomain domain switching in production).
+Fixed 500 error on staff deletion by refactoring StaffManagementComponent
+to use the model's official cleanupAndDelete() method, 
+preventing database foreign key constraint violations from related UserProfiles and other resources.
 
 TAXONOMY & LINEAGE:
 Tags: auth, staff-management, bugfix
@@ -142,7 +146,7 @@ Equipped with this structural and historical background, the agent immediately c
 
 ## 1. Installation
 
-Install the package globally in your Python environment:
+Install the package from the source:
 
 ```bash
 # Clone the repository
@@ -162,20 +166,20 @@ After installation, the **`pmc`** and **`project-memory`** CLI commands will be 
 
 ## 2. AI Agent Integration (MCP Setup)
 
-Project Memory Cortex runs as a local MCP server that automatically detects whichever project directory your AI editor has open.
+Project Memory Cortex runs as a local MCP server that automatically detects whichever project directory your coding harness has open.
 
 ### A. One-Click Automatic Setup
 
 Run the built-in installer for your favorite AI editor:
 
 ```bash
-# 1. Antigravity & Antigravity CLI (writes to ~/.gemini/config/mcp_config.json)
+# 1. Antigravity CLI
 pmc install-mcp --client antigravity
 
-# 2. Claude Desktop (writes to claude_desktop_config.json)
+# 2. Claude
 pmc install-mcp --client claude
 
-# 3. Cursor (writes to Cursor global storage config)
+# 3. Cursor
 pmc install-mcp --client cursor
 
 # 4. View JSON snippet without writing
@@ -186,24 +190,7 @@ pmc install-mcp --client print
 
 ### B. Manual MCP Configuration
 
-If you prefer to configure manually, add the following entry to your AI client's MCP configuration:
-
-#### 1. **Antigravity / Antigravity CLI (`~/.gemini/config/mcp_config.json`)**:
-```json
-{
-  "mcpServers": {
-    "project-memory": {
-      "command": "pmc",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-#### 2. **Claude Desktop (`claude_desktop_config.json`)**:
-* **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-* **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-* **Linux**: `~/.config/Claude/claude_desktop_config.json`
+If you prefer to configure manually, add the following entry to your coding harness client's MCP configuration:
 
 ```json
 {
@@ -216,13 +203,8 @@ If you prefer to configure manually, add the following entry to your AI client's
 }
 ```
 
-#### 3. **Cursor (`cursor_desktop_config.json` or Settings > Features > MCP)**:
-* **Command**: `pmc`
-* **Args**: `mcp`
 
----
-
-## 3. Agent Master Prompt & Rules (Automated)
+## 2. Agent Master Prompt & Rules (Automated)
 
 **You do not need to manually create rule files.**
 
@@ -253,7 +235,7 @@ You are connected to Project Memory Cortex to preserve engineering decisions acr
 
 ---
 
-## 4. CLI Usage & Commands
+## 3. CLI Usage & Commands
 
 You can run `pmc` in **any** project directory on your machine. It automatically discovers and initializes the `.project-memory/` directory for that workspace.
 
@@ -370,7 +352,7 @@ To see PMC's lineage tracing in action, running `pmc lineage 54bd72c1` outputs t
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Value for Developers & AI Agents**:
+**Value for Developers & Coding harness**:
 Instead of reading through unrelated commit logs or forgetting why a fix was made, you instantly trace the context: the **Staff Login Navigation Fix (`9385134c`)** was built on top of the **Email Verification Fix (`54bd72c1`)**, which was itself caused by variables introduced in the **Translation Dictionaries (`5e839b22`)**, the **Staff Page (`da20d017`)**, and the **Permissions Mapping (`a6a9dc1e`)**.
 
 ---
@@ -443,6 +425,6 @@ pytest tests/ -v
 
 ## License
 
-MIT License. Designed for AI agents and human developers.
+MIT License.
 
 
