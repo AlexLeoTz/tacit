@@ -3,25 +3,54 @@
   <h1>Tacit</h1>
   <p><strong>The Institutional Memory Layer & Decision Lineage Engine for AI Coding Agents</strong></p>
   <p>
+    <a href="#why-tacit-the-magic-in-a-nutshell">Why Tacit?</a> •
     <a href="#1-quick-start--installation">Quick Start</a> •
     <a href="#2-ai-agent-integration-mcp-setup">MCP Setup</a> •
     <a href="#3-agent-master-prompt--rules-automated">Master Rules</a> •
     <a href="#4-cli-usage--commands">CLI Commands</a> •
     <a href="#6-mcp-tools-reference">MCP Tools</a> •
-    <a href="#docs">Documentation</a>
+    <a href="#license">License</a>
   </p>
 </div>
 
 ---
 
-## Why Tacit?
+## Why Tacit? (The Magic in a Nutshell)
 
-AI coding assistants (Claude Code, Cursor, Antigravity, OpenCode) suffer from **context compaction and session amnesia**:
-- When chats reset or contexts compress, the model loses the **"why"** behind architectural choices.
-- Undocumented workarounds (*"hacks"*) get silently reverted, causing bug regressions.
-- Decisions get updated or reversed over time, and flat memory stores poison agent context with obsolete contradictory advice.
+### The New Hire Analogy
 
-**Tacit** gives AI coding assistants an **immutable, content-addressed institutional memory layer with causal supersedence and relevance-ranked bootstrapping**:
+Imagine a brilliant senior engineer joins your team on Day 1. 
+
+You wouldn't hand them a 10,000-line dump of raw Slack chats, nor would you expect them to decipher your entire Git commit history before writing their first function. 
+
+And you certainly wouldn't give them a notebook full of contradictory notes where:
+* **Page 12 says:** *"We authenticate users with passwords."*
+* **Page 40 says:** *"Switched to fingerprint authentication."*
+* **Page 88 says:** *"Fingerprint scanners kept failing in production — switched back to passwords."*
+
+A new person skimming that notebook sees three statements that all sound equally true. **Which one do they follow?**
+
+What that senior engineer actually needs is a **crisp, 2-minute morning briefing**:
+1. **The 3–5 foundational architectural decisions** that define how the system is built today (and *why* those choices were made).
+2. **The active undocumented workarounds ("hacks")** currently preventing outages in production so they don't accidentally "refactor" them away.
+3. **The vital operational commands and resolved error caveats** to avoid stepping into known traps.
+
+---
+
+### The AI Amnesia Problem
+
+**Every AI coding agent session (Claude Code, Cursor, Antigravity, OpenCode) is a brand-new engineer with total amnesia.**
+
+When you reset a chat or your conversation compresses past the context window:
+1. **Loss of the "Why"**: The agent forgets why an unusual pattern exists and "cleans it up", instantly re-introducing solved bugs and breaking production.
+2. **The Flat Memory Trap**: Most vector/agent-memory tools dump flat snippets of *"what"*. When decisions change over time, flat stores feed obsolete, contradictory advice straight into new sessions as active truth.
+3. **Repetitive Groundhog Day**: You find yourself re-explaining the same architectural rules, deploy commands, and environment caveats at the start of every session.
+
+---
+
+### How Tacit Works: The 4 Pillars
+
+Tacit acts as an **immutable, content-addressed institutional memory layer with causal supersedence and relevance-ranked bootstrapping**:
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
@@ -39,17 +68,40 @@ AI coding assistants (Claude Code, Cursor, Antigravity, OpenCode) suffer from **
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
  ┌───────────────┐        ┌───────────────┐        ┌───────────────┐
- │ SQLite + FTS5 │        │  Merkle DAG   │        │ Markdown &    │
- │ Engine (BM25) │        │ Lineage Engine│        │ Preview Server│
+ │ Hybrid Search │        │  Causal DAG   │        │ Markdown &    │
+ │ (BM25 + ONNX) │        │ Lineage Engine│        │ Preview Server│
  └───────┬───────┘        └───────┬───────┘        └───────┬───────┘
          │                        │                        │
          ▼                        ▼                        ▼
  ┌──────────────────────────────────────────────────────────────────┐
  │              Local Project Directory (.tacit/)                   │
- │              - memory.db (WAL SQLite with Typed Edges)           │
+ │              - memory.db (SQLite with Relational Edges)          │
  │              - Merkle Hash Tree & Causal Ancestry DAG            │
  └──────────────────────────────────────────────────────────────────┘
 ```
+
+#### 1. The Causal DAG & The "REPLACED" Sticker System
+Engineering history is immutable — you should never silently erase what you did in the past. But when a decision changes, Tacit slaps a typed **`supersedes`** sticker on the old entry pointing to the new one, explaining exactly *why* it was replaced. 
+* Dead advice is automatically filtered out of new agent sessions.
+* If an agent inspects an old decision, Tacit flashes a warning banner: `⚠️ SUPERSEDED by <successor_id>: "<reason>"`.
+* The complete causal ancestry (`derives_from` and `supersedes`) remains intact.
+
+#### 2. The 2-Minute Intelligent Bootstrap Briefing
+When an agent starts a session, calling `memory_context()` runs Tacit's multi-signal relevance scoring algorithm:
+$$	ext{Score}(d) = 0.35 \cdot 	ext{Impact}(d) + 0.40 \cdot 	ext{Centrality}(d) + 0.25 \cdot 	ext{Recency}(d) - 	ext{Penalty}(d)$$
+* **DAG Centrality**: Measures how many later active decisions depend on this node ($f_{	ext{centrality}} = rac{n}{n + 8}$). Foundational choices outrank minor recent tweaks.
+* **Recency Half-Life Decay**: A gentle 6-month freshness curve ($f_{	ext{recency}} = 0.5^{(	ext{age\_days} / 180)}$).
+* **Neighbor Penalty**: If a related decision was recently superseded, the node receives a decaying deduction.
+* **Token-Budgeted Diversity**: Assembles the top context into **Tier 1 (deep reading with lineage)** and **Tier 2 (one-liner summaries by tag)** within a customizable token budget (default: 2,000 tokens / `TACIT_TOKEN_BUDGET`).
+
+#### 3. Local Hybrid Search (FastEmbed ONNX + BM25)
+Zero cloud API keys, zero PyTorch bloat (~50MB ONNX runtime). Combines exact lexical matching (SQLite FTS5 / BM25) with dense semantic embeddings (`BAAI/bge-small-en-v1.5`) using **Reciprocal Rank Fusion (RRF)**:
+$$	ext{RRF}(d) = \sum_{r \in 	ext{channels}} rac{1}{60 + 	ext{rank}_r(d)}$$
+Queries execute in **< 5 milliseconds** on your local CPU with automatic scope and recency boosting.
+
+#### 4. Cryptographic Proofs & Dual-Write Storage
+* Every memory is addressed by its **SHA-256 content hash** and linked via a **Merkle root**. `tacit verify` cryptographically proves history has not been tampered with.
+* **Dual-Write**: Saves to `memory.db` for fast agent queries AND simultaneously maintains human-readable `.md` files in `.tacit/<category>/`.
 
 ---
 
@@ -62,6 +114,7 @@ AI coding assistants (Claude Code, Cursor, Antigravity, OpenCode) suffer from **
 6. [MCP Tools Reference](#6-mcp-tools-reference)
 7. [Multi-Project Support](#7-multi-project-support)
 8. [Testing](#8-testing)
+9. [License](#license)
 
 ---
 
@@ -204,8 +257,29 @@ tacit init
 # Generates intelligent DAG-centrality and recency-decayed project briefing
 tacit briefing
 
-# Or with custom token budget
+# Or customize token budget directly
 tacit briefing --budget 1500
+```
+
+### Search Memories (Hybrid BM25 + ONNX Embeddings)
+```bash
+# Hybrid semantic search with RRF fusion (default)
+tacit search "database connection exhaustion"
+
+# Keyword-only search
+tacit search "docker" --mode keyword --type command
+
+# Search with active file scope boosting
+tacit search "authentication" --scope src/api/auth.py
+
+# Include historical / superseded memories
+tacit search "JWT" --include-superseded
+```
+
+### Backfill Vector Embeddings
+```bash
+# Embed all memories in the database using local fastembed (idempotent and resumable)
+tacit reindex
 ```
 
 ### Record a Memory
@@ -234,15 +308,6 @@ tacit remember "Temporary fix for SQLite thread lock: set WAL mode and 5s timeou
   --type hack \
   --tags "sqlite,db,bugfix" \
   --parents 54bd72c1
-```
-
-### Search Memories
-```bash
-# Full-text search with BM25 ranking
-tacit search "JWT"
-
-# Filter by type
-tacit search "docker" --type command
 ```
 
 ### Verify Cryptographic Integrity
@@ -278,35 +343,15 @@ tacit export
 tacit export --output ./docs/project-memories
 ```
 
-### Dual-Write & Configuration Options
+### Configuration Options & Environment Variables
 
-By default, Tacit uses **Dual-Write mode**: it saves memories to `memory.db` (for SQLite FTS5 search) AND simultaneously creates human-readable `.md` files in `.tacit/<category>/`.
-
-To disable markdown auto-sync and use SQLite-only mode:
-
-```bash
-# In your terminal or .env file:
-TACIT_DUAL_WRITE=false
-```
-
-### Update Tacit Globally & Refresh Workspace
-```bash
-# Run in your project directory to upgrade Tacit globally and refresh local agent rules
-tacit update
-```
-
-### View Details & Delete
-
-```bash
-# View full markdown of a specific memory (accepts UUID or prefix)
-tacit get 4a9f
-
-# Delete a specific memory (auto-removes corresponding .md file)
-tacit delete 4a9f
-
-# Clear all memories for the current project
-tacit clear
-```
+| Variable | Default | Purpose |
+|---|---|---|
+| `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
+| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | FastEmbed ONNX embedding model. |
+| `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
+| `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
+| `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |
 
 ### Visualizing Causal DAGs & Lineage
 
@@ -341,7 +386,7 @@ When connected via MCP, AI agents have access to the following 6 tools:
 | Tool | Purpose | Key Arguments |
 |---|---|---|
 | `memory_add` | Persist a new immutable decision, command, hack, architecture, or error. Supports superseding past decisions. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
-| `memory_search` | High-speed FTS5 full-text search. | `query`, `type`, `tags`, `limit` |
+| `memory_search` | High-speed Hybrid search (BM25 + fastembed ONNX dense vectors via RRF). | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
 | `memory_get` | Fetch the full markdown content & Merkle lineage by ID. Displays alert banners if superseded/retracted. | `node_id` |
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
 | `memory_context` | Generate an intelligent relevance-ranked, token-budgeted project briefing (DAG centrality + impact + recency decay). | `budget`, `scope_hint`, `timeframe` |
@@ -375,4 +420,11 @@ pytest tests/ -v
 
 ## License
 
-MIT License.
+This project is licensed under the **Functional Source License, Version 1.1, MIT Conversion** ([`FSL-1.1-MIT`](./LICENSE)).
+
+### Plain English Summary:
+* **Free for Developers & Organizations**: You are free to use Tacit, modify it, integrate it into your internal workflows, deploy it in proprietary products, and redistribute it without paying any fees.
+* **The Only Restriction**: For a period of **two years** from each release date, you cannot take Tacit and offer it as a competing commercial cloud service or managed SaaS platform.
+* **Automatic Conversion to MIT**: Exactly two years after each release, the license for that version automatically and permanently converts to the standard, unrestricted **MIT License**.
+
+See the full [`LICENSE`](./LICENSE) file for complete legal terms.

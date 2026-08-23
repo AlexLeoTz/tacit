@@ -1,0 +1,66 @@
+Functional Source License, Version 1.1, MIT Conversion
+(FSL-1.1-MIT)
+
+Copyright (c) 2026 Alex Leo and Tacit Contributors.
+
+1. Definitions
+
+"Licensor" means the person or entity that distributes its Software under
+this License.
+
+"Software" means the software distributed by the Licensor under this License,
+including copyrightable works of authorship and patentable inventions.
+
+"Use" means any operation of the Software, including execution, storage,
+modification, reproduction, compilation, or distribution.
+
+"Change Date" means the date two years after the date on which Licensor makes
+the Software available under this License.
+
+2. License Grant
+
+Licensor grants you a non-exclusive, worldwide, royalty-free copyright license
+to Use the Software for all purposes, except for Competing Uses.
+
+3. Competing Uses
+
+A "Competing Use" means making the functionality of the Software available to
+third parties as a commercial service or managed SaaS platform that competes
+with the Software or any product or service offered by Licensor using the
+Software.
+
+4. Change to MIT License
+
+On the Change Date, or the date Licensor certifies that the Software has been
+released under the MIT License, whichever is earlier, Licensor grants you a
+license under the MIT License as follows:
+
+--------------------------------------------------------------------------------
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--------------------------------------------------------------------------------
+
+5. Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
