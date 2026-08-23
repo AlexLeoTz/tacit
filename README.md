@@ -321,7 +321,7 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 
 ## 3. CLI Usage & Commands
 
-You can run `tacit` (or legacy `pmc` alias) in **any** project directory on your machine. It automatically discovers and initializes the `.tacit/` directory (falling back to `.project-memory/` if it exists) for that workspace.
+You can run `tacit` in **any** project directory on your machine. It automatically discovers and initializes the `.tacit/` directory for that workspace.
 
 ### Initialize a Project
 ```bash
@@ -489,8 +489,8 @@ When connected via MCP, AI agents have access to the following 6 tools:
 ## 7. Multi-Project Support
 
 Tacit automatically keeps each codebase's memories isolated:
-- Every project stores its database at `<project-root>/.tacit/memory.db` (with legacy fallback support to `.project-memory/`).
-- Auto-detects the project root from `.git`, `package.json`, `pyproject.toml`, `.tacit`, or `.project-memory`.
+- Every project stores its database at `<project-root>/.tacit/memory.db`.
+- Auto-detects the project root from `.git`, `package.json`, `pyproject.toml`, or `.tacit`.
 - Track all projects on your machine with:
   ```bash
   tacit projects

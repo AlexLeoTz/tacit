@@ -762,7 +762,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
                 <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-                    Use the global <code>tacit</code> (or legacy <code>pmc</code>) binary in any project terminal to record or query decision graphs.
+                    Use the global <code>tacit</code> binary in any project terminal to record or query decision graphs.
                 </p>
                 <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
                     <div>
@@ -815,13 +815,13 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         let memories = [];
         let projects = [];
         let currentProjectName = "";
-        let selectedProject = localStorage.getItem('tacit_selected_project') || localStorage.getItem('pmc_selected_project') || "current";
+        let selectedProject = localStorage.getItem('tacit_selected_project') || "current";
         let currentMemoryId = null;
         let currentFilter = "all";
 
         // Theme management (light, dark, system)
         function initTheme() {
-            const savedTheme = localStorage.getItem('tacit_theme') || localStorage.getItem('pmc_theme') || 'system';
+            const savedTheme = localStorage.getItem('tacit_theme') || 'system';
             setTheme(savedTheme, false);
         }
 

@@ -20,8 +20,6 @@ setup(
     entry_points={
         "console_scripts": [
             "tacit=src.cli.main:app",
-            "pmc=src.cli.main:app",
-            "project-memory=src.cli.main:app",
         ],
     },
 )

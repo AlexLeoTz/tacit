@@ -179,7 +179,7 @@ def validate_scope_paths(scope: List[str], project_path: Optional[str] = None) -
     import os
 
     # Skip validation if disabled via env var (e.g., for test isolation)
-    if os.environ.get("TACIT_NO_PATH_VALIDATION", os.environ.get("PMC_NO_PATH_VALIDATION")) == "true":
+    if os.environ.get("TACIT_NO_PATH_VALIDATION") == "true":
         return
 
     try:

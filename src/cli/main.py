@@ -99,7 +99,7 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
    - If NO (e.g., routine refactor, styling tweak, or typo fix), do not pollute project memory.
 """
     # 1. Antigravity rule
-    agy_rule = target_root / ".agents" / "rules" / "project_memory.md"
+    agy_rule = target_root / ".agents" / "rules" / "tacit.md"
     agy_rule.parent.mkdir(parents=True, exist_ok=True)
     if force or not agy_rule.exists():
         agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Tacit\n---\n\n{rule_content}", encoding="utf-8")
@@ -639,7 +639,7 @@ def install_mcp(
 
 @app.command()
 def update(
-    git_url: str = typer.Option("https://github.com/AlexLeoTz/project-memory-cortext.git", "--url", help="Git repository URL to update from"),
+    git_url: str = typer.Option("https://github.com/AlexLeoTz/tacit.git", "--url", help="Git repository URL to update from"),
 ):
     """Update Tacit globally to the latest version from GitHub and refresh project rules in the current directory."""
     import subprocess
@@ -685,10 +685,7 @@ def update(
             try:
                 subprocess.run(["tacit", "init", "--force"], check=False)
             except Exception:
-                try:
-                    subprocess.run(["pmc", "init", "--force"], check=False)
-                except Exception:
-                    pass
+                pass
 
         console.print(Panel.fit(
             f"[bold green]Tacit Successfully Updated![/bold green]\n"

@@ -57,17 +57,11 @@ class Config:
 
     @classmethod
     def get_memory_dir(cls, project_root: Optional[str | Path] = None) -> Path:
-        """Get the memory directory (.tacit or legacy .project-memory) for a specific project."""
+        """Get the memory directory (.tacit) for a specific project."""
         root = cls.find_project_root(project_root)
         env_dir = os.getenv("MEMORY_DIR")
         if env_dir and not project_root:
             return Path(env_dir).resolve()
-        
-        # Check if legacy .project-memory exists first, to ensure backwards compatibility
-        legacy_dir = root / ".project-memory"
-        if legacy_dir.exists() and not (root / cls.DEFAULT_MEMORY_DIR_NAME).exists():
-            return legacy_dir
-            
         return root / cls.DEFAULT_MEMORY_DIR_NAME
 
     @classmethod
@@ -102,21 +96,10 @@ class Config:
 
     @classmethod
     def _load_projects_registry(cls) -> Dict[str, str]:
-        """Loads projects with fallback to legacy pmc_projects.json"""
+        """Loads projects from registry file."""
         if cls.REGISTRY_FILE.exists():
             try:
                 return json.loads(cls.REGISTRY_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-        
-        legacy_file = cls.REGISTRY_FILE.parent / "pmc_projects.json"
-        if legacy_file.exists():
-            try:
-                data = json.loads(legacy_file.read_text(encoding="utf-8"))
-                # Migrate to the new registry file
-                cls.REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-                cls.REGISTRY_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                return data
             except Exception:
                 pass
         return {}
@@ -163,14 +146,6 @@ class Config:
         from .. import __version__
 
         cache_path = cls.REGISTRY_FILE.parent / "tacit_update_cache.json"
-        if not cache_path.exists():
-            legacy_cache = cls.REGISTRY_FILE.parent / "pmc_update_cache.json"
-            if legacy_cache.exists():
-                try:
-                    legacy_cache.rename(cache_path)
-                except Exception:
-                    pass
-
         now = time.time()
 
         if cache_path.exists():
@@ -187,7 +162,7 @@ class Config:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             req = urllib.request.Request(
-                "https://api.github.com/repos/AlexLeoTz/project-memory-cortext/releases/latest",
+                "https://api.github.com/repos/AlexLeoTz/tacit/releases/latest",
                 headers={"User-Agent": "Tacit-Update-Checker", "Accept": "application/vnd.github.v3+json"},
             )
             with urllib.request.urlopen(req, timeout=1.5) as response:
