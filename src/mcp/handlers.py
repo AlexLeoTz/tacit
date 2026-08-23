@@ -343,13 +343,13 @@ Merkle Root: {node.merkle_root}
             return {
                 "success": True,
                 "node_id": node_id,
-                "message": f"🗑️ Memory node `{node_id}` successfully deleted.",
+                "message": f"Memory node `{node_id}` successfully deleted.",
             }
         else:
             return {
                 "success": False,
                 "node_id": node_id,
-                "message": f"❌ Memory node `{node_id}` not found or could not be deleted.",
+                "message": f"Memory node `{node_id}` not found or could not be deleted.",
             }
 
     def handle_memory_clear(self, project: Optional[str] = None) -> Dict[str, Any]:
@@ -359,5 +359,5 @@ Merkle Root: {node.merkle_root}
         return {
             "success": True,
             "count": count,
-            "message": f"🗑️ Cleared all {count} memories from project storage.",
+            "message": f"Cleared all {count} memories from project storage.",
         }
