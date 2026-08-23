@@ -176,8 +176,8 @@ class MarkdownPreviewServer:
                     self.send_header("Content-type", "text/plain")
                     self.end_headers()
                     self.wfile.write(b"OK")
-                elif parsed.path == "/docs/logo.jpg":
-                    logo_path = Config.find_project_root() / "docs" / "logo.jpg"
+                elif parsed.path == "/logo.jpg":
+                    logo_path = Config.find_project_root() / "logo.jpg"
                     if logo_path.exists():
                         self.send_response(200)
                         self.send_header("Content-type", "image/jpeg")

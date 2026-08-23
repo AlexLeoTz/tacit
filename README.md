@@ -1,6 +1,6 @@
 # Tacit
 
-![Tacit Logo](docs/logo.jpg)
+![Tacit Logo](logo.jpg)
 
 ```text
   _______   _    _____ _____ _______ 
