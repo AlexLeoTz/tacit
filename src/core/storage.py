@@ -2,7 +2,7 @@
 
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import threading
 
 from .memory_node import MemoryNode
@@ -48,9 +48,21 @@ class MemoryStorage:
                         status TEXT,
                         content_hash TEXT UNIQUE,
                         merkle_root TEXT,
-                        metadata TEXT
+                        metadata TEXT,
+                        embedding BLOB,
+                        embedded_at REAL
                     )
                 """)
+
+                # Automatic schema migration for existing databases
+                try:
+                    conn.execute("ALTER TABLE memories ADD COLUMN embedding BLOB")
+                except Exception:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE memories ADD COLUMN embedded_at REAL")
+                except Exception:
+                    pass
 
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS edges (
@@ -247,6 +259,21 @@ class MemoryStorage:
                         INSERT INTO memories_fts(memory_id, content, summary, title, tags)
                         VALUES (?, ?, ?, ?, ?)
                     """, (node.id, node.content, node.summary, node.title, tags_str))
+
+                # Write-path embedding (never fails the add)
+                try:
+                    from ..search.embeddings import EmbeddingService
+                    from ..search.hybrid import build_embed_text
+                    from ..search.vectordb import normalize, serialize_f32
+                    embed_svc = EmbeddingService.get()
+                    if embed_svc.available:
+                        text = build_embed_text(title=node.title, tags=node.tags, summary=node.summary, content=node.content)
+                        raw_vec = embed_svc.embed_documents([text])[0]
+                        norm_vec = normalize(raw_vec)
+                        blob = serialize_f32(norm_vec)
+                        conn.execute("UPDATE memories SET embedding = ?, embedded_at = ? WHERE id = ?", (blob, node.timestamp, node.id))
+                except Exception:
+                    pass
 
                 conn.commit()
                 # Dual-write: write markdown file immediately to category directory if enabled
@@ -525,4 +552,76 @@ class MemoryStorage:
                 return count
             finally:
                 conn.close()
+
+    def search_hybrid(
+        self,
+        query: str,
+        limit: int = 10,
+        mode: str = "hybrid",
+        scope_hint: Optional[List[str]] = None,
+        memory_type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        include_superseded: bool = False,
+        debug: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Execute hybrid search combining BM25 keyword matching and dense vector similarity via RRF."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                from ..search.hybrid import HybridSearchEngine
+                return HybridSearchEngine.search(
+                    conn=conn,
+                    query=query,
+                    limit=limit,
+                    mode=mode,
+                    scope_hint=scope_hint,
+                    type_filter=memory_type,
+                    tags=tags,
+                    include_superseded=include_superseded,
+                    debug=debug,
+                )
+            finally:
+                conn.close()
+
+    def reindex_all(self, progress: bool = True) -> Tuple[int, int]:
+        """Resumable backfill of vector embeddings for all memories lacking embeddings."""
+        from ..search.embeddings import EmbeddingService
+        from ..search.hybrid import build_embed_text
+        from ..search.vectordb import normalize, serialize_f32
+
+        embed_svc = EmbeddingService.get()
+        if not embed_svc.available:
+            return 0, 0
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, title, tags, summary, content, timestamp FROM memories WHERE embedded_at IS NULL"
+                ).fetchall()
+                total = len(rows)
+                if total == 0:
+                    return 0, 0
+
+                done = 0
+                batch_size = 64
+                for i in range(0, total, batch_size):
+                    chunk = rows[i:i + batch_size]
+                    texts = []
+                    for r in chunk:
+                        import json
+                        tags_list = json.loads(r[2]) if r[2] else []
+                        texts.append(build_embed_text(title=r[1], tags=tags_list, summary=r[3], content=r[4]))
+
+                    vecs = embed_svc.embed_documents(texts)
+                    for r, v in zip(chunk, vecs):
+                        norm_v = normalize(v)
+                        blob = serialize_f32(norm_v)
+                        conn.execute("UPDATE memories SET embedding = ?, embedded_at = ? WHERE id = ?", (blob, r[5], r[0]))
+                    done += len(chunk)
+                    conn.commit()
+                return done, total
+            finally:
+                conn.close()
+
 

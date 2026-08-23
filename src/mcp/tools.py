@@ -95,6 +95,27 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "default": 10,
                     "description": "Maximum number of memory results to return.",
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["hybrid", "keyword"],
+                    "default": "hybrid",
+                    "description": "Search mode: 'hybrid' (BM25 + dense vector RRF) or 'keyword' (BM25 only).",
+                },
+                "scope_hint": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Active file paths or module paths to prioritize relevance via scope boosting.",
+                },
+                "include_superseded": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Whether to include superseded or historical memories in search results.",
+                },
+                "debug": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Return BM25 and vector rank provenance for search tuning.",
+                },
                 "project": {
                     "type": "string",
                     "description": "Optional project name or root path.",

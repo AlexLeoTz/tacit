@@ -131,12 +131,24 @@ class MemoryMCPHandlers:
         type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         limit: int = 10,
+        mode: str = "hybrid",
+        scope_hint: Optional[List[str]] = None,
+        include_superseded: bool = False,
+        debug: bool = False,
         project: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Search memories via full text index and filters in target project."""
+        """Search memories via hybrid FTS5/dense vector engine with RRF fusion."""
         storage = self._resolve_storage(project)
-        fts = FullTextSearch(storage)
-        results = fts.search(query=query, limit=limit, memory_type=type, tags=tags)
+        results = storage.search_hybrid(
+            query=query,
+            limit=limit,
+            mode=mode,
+            scope_hint=scope_hint,
+            memory_type=type,
+            tags=tags,
+            include_superseded=include_superseded,
+            debug=debug,
+        )
         if not results:
             proj_hint = f" in project '{project}'" if project else ""
             return {
@@ -147,14 +159,22 @@ class MemoryMCPHandlers:
 
         formatted_lines = [f"Found {len(results)} memory entries for '{query}':\n"]
         items = []
-        for node in results:
+        for item in results:
+            node = item["node"]
+            score = item.get("score", 0.0)
             date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
             tags_str = f" [tags: {', '.join(node.tags)}]" if node.tags else ""
-            formatted_lines.append(f"- [{date_str}] ({node.type.upper()}) {node.title or node.summary}")
-            formatted_lines.append(f"  Summary: {node.summary}")
-            formatted_lines.append(f"  ID: `{node.id}`{tags_str}\n")
+            prov_str = ""
+            if debug and "provenance" in item:
+                p = item["provenance"]
+                prov_str = f" [bm25_rank: {p.get('bm25_rank')}, vec_rank: {p.get('vec_rank')}]"
 
-            items.append({
+            status_flag = f" [{node.status.upper()}]" if node.status != "active" else ""
+            formatted_lines.append(f"- [{date_str}] ({node.type.upper()}){status_flag} {node.title or node.summary}")
+            formatted_lines.append(f"  Summary: {node.summary}")
+            formatted_lines.append(f"  ID: `{node.id}` (Score: {score:.3f}){tags_str}{prov_str}\n")
+
+            entry: Dict[str, Any] = {
                 "id": node.id,
                 "timestamp": node.timestamp,
                 "type": node.type,
@@ -162,7 +182,12 @@ class MemoryMCPHandlers:
                 "summary": node.summary,
                 "tags": node.tags,
                 "impact": node.impact,
-            })
+                "status": node.status,
+                "score": score,
+            }
+            if debug and "provenance" in item:
+                entry["provenance"] = item["provenance"]
+            items.append(entry)
 
         return {
             "count": len(results),

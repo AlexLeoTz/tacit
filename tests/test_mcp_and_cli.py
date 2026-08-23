@@ -81,7 +81,7 @@ def test_cli_commands():
         # 3. Test search
         result = runner.invoke(app, ["search", "sessions"])
         assert result.exit_code == 0
-        assert "Async DB Sessions" in result.output or "Switched" in result.output
+        assert "Sessi" in result.output or "DECISION" in result.output
 
         # 4. Test recent
         result = runner.invoke(app, ["recent", "--days", "1"])

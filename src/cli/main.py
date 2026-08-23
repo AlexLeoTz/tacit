@@ -187,37 +187,77 @@ def remember(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by memory type"),
+    mode: str = typer.Option("hybrid", "--mode", "-m", help="Search mode: hybrid or keyword"),
+    scope: Optional[str] = typer.Option(None, "--scope", help="Comma-separated scope path hints"),
+    all_status: bool = typer.Option(False, "--all-status", "--include-superseded", help="Include superseded memories"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Display BM25/vector rank provenance"),
     limit: int = typer.Option(10, "--limit", "-n", help="Maximum results to display"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
-    """Search stored memories using full-text search."""
+    """Search stored memories using hybrid BM25 / dense vector search with RRF fusion."""
     storage = get_storage(project)
-    results = storage.search_full_text(query=query, limit=limit, memory_type=type)
+    scope_list = [s.strip() for s in scope.split(",") if s.strip()] if scope else None
+
+    results = storage.search_hybrid(
+        query=query,
+        limit=limit,
+        mode=mode,
+        scope_hint=scope_list,
+        memory_type=type,
+        include_superseded=all_status,
+        debug=debug,
+    )
 
     if not results:
         proj_hint = f" in project '{project}'" if project else ""
         console.print(f"[yellow]No memory entries found matching '{query}'{proj_hint}.[/yellow]")
         return
 
-    table = Table(title=f"Search Results for '{query}' ({len(results)} found)", show_header=True, header_style="bold cyan")
-    table.add_column("Date", style="dim", width=18)
-    table.add_column("Type", style="magenta", width=12)
-    table.add_column("Summary", style="white")
-    table.add_column("Tags", style="cyan")
-    table.add_column("ID", style="dim", width=10)
+    table = Table(title=f"Search Results for '{query}' ({len(results)} found, mode={mode})", show_header=True, header_style="bold cyan")
+    table.add_column("Date", style="dim", width=16)
+    table.add_column("Type", style="magenta", width=10)
+    table.add_column("Score", style="green", width=7)
+    table.add_column("Summary", style="white", min_width=25)
+    table.add_column("Tags", style="cyan", width=12)
+    table.add_column("ID", style="dim", width=9)
 
-    for node in results:
+    for item in results:
+        node = item["node"]
+        score = item.get("score", 0.0)
         date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
         tags_str = ", ".join(node.tags) if node.tags else ""
+        status_flag = f" [{node.status.upper()}]" if node.status != "active" else ""
         table.add_row(
             date_str,
-            f"[{node.type}]",
-            node.summary,
+            f"[{node.type}]{status_flag}",
+            f"{score:.3f}",
+            node.title or node.summary,
             tags_str,
             node.id[:8],
         )
 
     console.print(table)
+
+
+@app.command()
+def reindex(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Backfill missing dense vector embeddings across all memories in the project database."""
+    storage = get_storage(project)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Embedding memory entries via fastembed (ONNX)...", total=None)
+        done, total = storage.reindex_all(progress=False)
+        progress.advance(task)
+
+    if total == 0:
+        console.print("[green]All memory entries are already indexed with dense vector embeddings.[/green]")
+    else:
+        console.print(f"[bold green]Successfully embedded {done}/{total} memories into vector storage.[/bold green]")
 
 
 @app.command()

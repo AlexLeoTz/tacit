@@ -16,6 +16,8 @@ setup(
         "markdown>=3.5.0",
         "python-dotenv>=1.0.0",
         "watchdog>=3.0.0",
+        "fastembed>=0.4.0",
+        "numpy>=1.24.0",
     ],
     entry_points={
         "console_scripts": [

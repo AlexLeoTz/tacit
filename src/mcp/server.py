@@ -57,14 +57,22 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         limit: int = 10,
+        mode: str = "hybrid",
+        scope_hint: Optional[List[str]] = None,
+        include_superseded: bool = False,
+        debug: bool = False,
         project: Optional[str] = None,
     ) -> str:
-        """Search memory entries using full-text index with optional category or tag filtering."""
+        """Search memory entries using hybrid BM25 / dense vector search with RRF fusion."""
         res = handlers.handle_memory_search(
             query=query,
             type=type,
             tags=tags,
             limit=limit,
+            mode=mode,
+            scope_hint=scope_hint,
+            include_superseded=include_superseded,
+            debug=debug,
             project=project,
         )
         return res.get("formatted") or json.dumps(res, indent=2)
