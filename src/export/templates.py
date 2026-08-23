@@ -43,771 +43,361 @@ Total Memories: **{total_count}**
 """
 
 HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
-<html lang="en" data-theme="system">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tacit Preview</title>
-    <style>
-        /* Base / Dark Theme (Default) */
-        :root {
-            --bg: #0a0a0a;
-            --sidebar-bg: #121212;
-            --card-bg: #161616;
-            --card-hover: #222222;
-            --card-active: #2a2a2a;
-            --fg: #ffffff;
-            --fg-muted: #8f8f8f;
-            --accent: #ffffff;
-            --accent-hover: #e5e5e5;
-            --border: #262626;
-            --badge-bg: #1a1a1a;
-            --code-bg: #1e1e1e;
-            --pre-bg: #141414;
-            --success: #ffffff;
-            --error: #ff4444;
-            --danger-bg: #2d1616;
-            --danger-hover: #401f1f;
-            --danger-text: #ff8888;
-        }
-
-        /* Light Theme */
-        [data-theme="light"] {
-            --bg: #ffffff;
-            --sidebar-bg: #f5f5f5;
-            --card-bg: #ffffff;
-            --card-hover: #fafafa;
-            --card-active: #eeeeee;
-            --fg: #000000;
-            --fg-muted: #707070;
-            --accent: #000000;
-            --accent-hover: #222222;
-            --border: #e5e5e5;
-            --badge-bg: #f0f0f0;
-            --code-bg: #f0f0f0;
-            --pre-bg: #fafafa;
-            --danger-bg: #fee2e2;
-            --danger-hover: #fecaca;
-            --danger-text: #dc2626;
-        }
-
-        /* Explicit Dark Theme */
-        [data-theme="dark"] {
-            --bg: #0a0a0a;
-            --sidebar-bg: #121212;
-            --card-bg: #161616;
-            --card-hover: #222222;
-            --card-active: #2a2a2a;
-            --fg: #ffffff;
-            --fg-muted: #8f8f8f;
-            --accent: #ffffff;
-            --accent-hover: #e5e5e5;
-            --border: #262626;
-            --badge-bg: #1a1a1a;
-            --code-bg: #1e1e1e;
-            --pre-bg: #141414;
-            --danger-bg: #2d1616;
-            --danger-hover: #401f1f;
-            --danger-text: #ff8888;
-        }
-
-        @media (prefers-color-scheme: light) {
-            [data-theme="system"] {
-                --bg: #ffffff;
-                --sidebar-bg: #f5f5f5;
-                --card-bg: #ffffff;
-                --card-hover: #fafafa;
-                --card-active: #eeeeee;
-                --fg: #000000;
-                --fg-muted: #707070;
-                --accent: #000000;
-                --accent-hover: #222222;
-                --border: #e5e5e5;
-                --badge-bg: #f0f0f0;
-                --code-bg: #f0f0f0;
-                --pre-bg: #fafafa;
-                --danger-bg: #fee2e2;
-                --danger-hover: #fecaca;
-                --danger-text: #dc2626;
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        zinc: {
+                            950: '#09090b',
+                        }
+                    }
+                }
             }
         }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg);
-            color: var(--fg);
-            display: flex;
-            height: 100vh;
-            overflow: hidden;
-            transition: background 0.15s ease, color 0.15s ease;
-        }
-
-        /* Sidebar */
-        .sidebar {
-            width: 380px;
-            background: var(--sidebar-bg);
-            border-right: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
-
-        .sidebar-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .header-top-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .app-title {
-            font-size: 15px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        /* Theme Switcher */
-        .theme-switcher {
-            display: flex;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 2px;
-            gap: 2px;
-        }
-        .theme-btn {
-            background: transparent;
-            border: none;
-            color: var(--fg-muted);
-            padding: 4px 6px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            line-height: 1;
-            display: flex;
-            align-items: center;
-            transition: all 0.15s ease;
-        }
-        .theme-btn.active {
-            background: var(--accent);
-            color: #ffffff;
-        }
-
-        /* Project Selector */
-        .project-bar {
-            margin-bottom: 10px;
-        }
-        .project-dropdown {
-            width: 100%;
-            padding: 7px 10px;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            outline: none;
-            cursor: pointer;
-            transition: border-color 0.15s ease;
-        }
-        .project-dropdown:focus {
-            border-color: var(--accent);
-        }
-
-        .search-box {
-            width: 100%;
-            padding: 8px 12px;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            border-radius: 6px;
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.15s ease;
-        }
-        .search-box:focus {
-            border-color: var(--accent);
-        }
-
-        .filter-chips {
-            display: flex;
-            gap: 6px;
-            margin-top: 10px;
-            overflow-x: auto;
-            padding-bottom: 4px;
-        }
-        .filter-chip {
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 12px;
-            background: var(--badge-bg);
-            color: var(--fg-muted);
-            cursor: pointer;
-            border: 1px solid transparent;
-            white-space: nowrap;
-            user-select: none;
-        }
-        .filter-chip.active {
-            background: var(--accent);
-            color: #ffffff;
-        }
-
-        .memory-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .memory-item {
-            padding: 12px;
-            border-radius: 8px;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        .memory-item:hover {
-            background: var(--card-hover);
-        }
-        .memory-item.active {
-            background: var(--card-active);
-            border-color: var(--accent);
-        }
-
-        .item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 6px;
-        }
-
-        .type-badge {
-            display: inline-block;
-            padding: 2px 7px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-        }
-        .badge-decision { background: #1e3a8a; color: #93c5fd; }
-        .badge-command { background: #374151; color: #d1d5db; }
-        .badge-hack { background: #713f12; color: #fde047; }
-        .badge-architecture { background: #14532d; color: #86efac; }
-        .badge-error { background: #7f1d1d; color: #fca5a5; }
-        .badge-context { background: #4c1d95; color: #d8b4fe; }
-
-        .proj-badge {
-            display: inline-block;
-            padding: 1px 6px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 600;
-            background: var(--badge-bg);
-            color: var(--accent);
-            border: 1px solid var(--border);
-            margin-left: 6px;
-        }
-
-        .item-date {
-            font-size: 11px;
-            color: var(--fg-muted);
-        }
-
-        .item-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--fg);
-            margin-bottom: 4px;
-            line-height: 1.4;
-        }
-
-        .item-summary {
-            font-size: 12px;
-            color: var(--fg-muted);
-            line-height: 1.4;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        /* Sidebar Footer */
-        .sidebar-footer {
-            padding: 12px 16px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .btn-clear-all {
-            background: transparent;
-            color: var(--danger-text);
-            border: 1px solid var(--border);
-            padding: 5px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            transition: all 0.15s ease;
-        }
-        .btn-clear-all:hover {
-            background: var(--danger-bg);
-        }
-
-        .mem-count-badge {
-            font-size: 11px;
-            color: var(--fg-muted);
-        }
-
-        /* Main Content View */
-        .content-wrapper {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            overflow: hidden;
-        }
-
-        .action-bar {
-            padding: 12px 60px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            background: var(--sidebar-bg);
-            gap: 12px;
-        }
-
-        .btn-delete {
-            background: var(--danger-bg);
-            color: var(--danger-text);
-            border: 1px solid var(--border);
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.15s ease;
-        }
-        .btn-delete:hover {
-            background: var(--danger-hover);
-            color: #ffffff;
-        }
-
-        .content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 40px 60px;
-            background: var(--bg);
-        }
-
-        .markdown-body {
-            max-width: 820px;
-            margin: 0 auto;
-            line-height: 1.65;
-            font-size: 15px;
-        }
-
-        .markdown-body h1 {
-            font-size: 26px;
-            margin-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 12px;
-        }
-        .markdown-body h2 {
-            font-size: 19px;
-            margin-top: 28px;
-            margin-bottom: 12px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 6px;
-        }
-        .markdown-body p { margin-bottom: 14px; }
-        .markdown-body ul, .markdown-body ol { margin-left: 20px; margin-bottom: 14px; }
-        .markdown-body li { margin-bottom: 6px; }
-        .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
-        .markdown-body code {
-            background: var(--code-bg);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-            font-size: 13px;
-        }
-        .markdown-body pre {
-            background: var(--pre-bg);
-            border: 1px solid var(--border);
-            padding: 16px;
-            border-radius: 6px;
-            overflow-x: auto;
-            margin-bottom: 16px;
-        }
-        .markdown-body pre code {
-            background: transparent;
-            padding: 0;
-        }
-
-        /* Empty State */
-        .empty-box {
-            padding: 30px 20px;
-            text-align: center;
-            color: var(--fg-muted);
-            font-size: 13px;
-            line-height: 1.6;
-        }
-        .empty-box strong { color: var(--fg); }
-        .empty-proj-btn {
-            display: inline-block;
-            margin-top: 8px;
-            margin-right: 6px;
-            padding: 4px 10px;
-            border-radius: 6px;
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            color: var(--accent);
-            cursor: pointer;
-            font-size: 11px;
-            font-weight: 600;
-        }
-        .empty-proj-btn:hover {
-            background: var(--card-hover);
-        }
-
-        /* Modal Dialog */
+    </script>
+    <style>
         .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay .modal-card {
+            transition: transform 0.2s ease;
+            transform: scale(0.95);
         }
         .modal-overlay.active {
-            display: flex;
+            opacity: 1;
+            pointer-events: auto;
         }
-
-        .modal-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 24px;
-            max-width: 460px;
-            width: 90%;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        .modal-overlay.active .modal-card {
+            transform: scale(1);
         }
-        .modal-title {
-            font-size: 16px;
+        
+        /* Modern markdown styling classes */
+        .markdown-body {
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+        .markdown-body h1 {
+            font-size: 1.75rem;
             font-weight: 700;
-            margin-bottom: 8px;
-            color: #ef4444;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(156, 163, 175, 0.2);
         }
-        .modal-body {
-            font-size: 13px;
-            color: var(--fg-muted);
-            line-height: 1.5;
-            margin-bottom: 20px;
-        }
-        .modal-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-        .btn-cancel {
-            background: var(--card-hover);
-            color: var(--fg);
-            border: 1px solid var(--border);
-            padding: 7px 14px;
-            border-radius: 6px;
-            font-size: 13px;
-            cursor: pointer;
-        }
-        .btn-confirm-delete {
-            background: #ef4444;
-            color: white;
-            border: none;
-            padding: 7px 14px;
-            border-radius: 6px;
-            font-size: 13px;
+        .markdown-body h2 {
+            font-size: 1.35rem;
             font-weight: 600;
-            cursor: pointer;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid rgba(156, 163, 175, 0.1);
         }
-        .btn-confirm-delete:hover {
-            background: #dc2626;
+        .markdown-body p {
+            margin-bottom: 1rem;
         }
-
-        /* Status Indicator */
-        .connection-status {
-            position: fixed;
-            bottom: 18px;
-            right: 18px;
-            padding: 6px 12px;
-            border-radius: 20px;
-            background: var(--success);
-            color: white;
-            font-size: 11px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        .markdown-body ul, .markdown-body ol {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+            list-style-type: disc;
         }
-        .connection-status.disconnected {
-            background: var(--error);
+        .markdown-body li {
+            margin-bottom: 0.35rem;
+        }
+        .markdown-body code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.85em;
+            padding: 0.15em 0.4em;
+            background-color: rgba(156, 163, 175, 0.15);
+            border-radius: 0.25rem;
+        }
+        .markdown-body pre {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.9em;
+            padding: 1rem;
+            overflow-x: auto;
+            background-color: rgba(156, 163, 175, 0.08);
+            border: 1px solid rgba(156, 163, 175, 0.15);
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
         }
     </style>
 </head>
-<body>
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <div class="header-top-row">
-                <div class="app-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20" style="fill: none; stroke: var(--fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-right: 2px;">
-                        <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                        <polyline points="2 17 12 22 22 17" />
-                        <polyline points="2 12 12 17 22 12" />
-                    </svg>
+<body class="bg-white text-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 flex h-screen overflow-hidden font-sans transition-colors duration-150">
+    <div class="w-80 md:w-96 bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full shrink-0">
+        <div class="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+                <div class="text-base font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-1.5">
                     <span>Tacit</span>
                 </div>
-                <div class="theme-switcher">
-                    <button class="theme-btn" data-theme="light" title="Light Theme" onclick="setTheme('light')">Light</button>
-                    <button class="theme-btn" data-theme="dark" title="Dark Theme" onclick="setTheme('dark')">Dark</button>
-                    <button class="theme-btn active" data-theme="system" title="System Theme" onclick="setTheme('system')">Auto</button>
+                <div class="flex bg-zinc-200 dark:bg-zinc-800 rounded-md p-0.5 gap-0.5 border border-zinc-300 dark:border-zinc-700">
+                    <button class="theme-btn px-2 py-0.5 rounded text-[10px] font-semibold transition-all" data-theme="light" title="Light Theme" onclick="setTheme('light')">Light</button>
+                    <button class="theme-btn px-2 py-0.5 rounded text-[10px] font-semibold transition-all" data-theme="dark" title="Dark Theme" onclick="setTheme('dark')">Dark</button>
+                    <button class="theme-btn px-2 py-0.5 rounded text-[10px] font-semibold transition-all active" data-theme="system" title="System Theme" onclick="setTheme('system')">Auto</button>
                 </div>
             </div>
-            <div class="project-bar">
-                <select class="project-dropdown" id="project-select" onchange="onProjectChange(this.value)">
+            
+            <div>
+                <select class="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md text-xs font-semibold outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer" id="project-select" onchange="onProjectChange(this.value)">
                     <option value="current">Current Workspace</option>
                     <option value="all">All Projects</option>
                 </select>
             </div>
-            <input type="text" class="search-box" placeholder="Search memory nodes..." id="search">
-            <div style="display: flex; gap: 8px; margin-top: 10px;">
-                <button class="btn-primary" onclick="openAddMemoryModal()" style="flex: 1; padding: 6px; font-size: 11px; font-weight: 600; border-radius: 6px; background: var(--accent); color: white; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.15s ease;">
-                    <span>+ Add Memory</span>
+            
+            <div class="relative">
+                <input type="text" class="w-full pl-8 pr-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md text-xs outline-none focus:ring-1 focus:ring-cyan-500 placeholder-zinc-400" placeholder="Search memory nodes..." id="search">
+                <div class="absolute left-2.5 top-2.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5 text-zinc-400">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                    </svg>
+                </div>
+            </div>
+            
+            <div class="flex gap-2">
+                <button class="flex-1 py-1.5 px-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition-all" onclick="openAddMemoryModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    <span>Add Memory</span>
                 </button>
-                <button class="btn-secondary" onclick="openCliModal()" style="flex: 1; padding: 6px; font-size: 11px; font-weight: 600; border-radius: 6px; background: var(--badge-bg); color: var(--fg); border: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.15s ease;">
-                    <span>ℹ️ CLI Reference</span>
+                <button class="py-1.5 px-3 bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition-all" onclick="openCliModal()">
+                    <span>CLI Reference</span>
                 </button>
             </div>
-            <div class="filter-chips" id="filter-chips">
-                <div class="filter-chip active" data-type="all">All</div>
-                <div class="filter-chip" data-type="decision">Decision</div>
-                <div class="filter-chip" data-type="architecture">Architecture</div>
-                <div class="filter-chip" data-type="hack">Hack</div>
-                <div class="filter-chip" data-type="command">Command</div>
-                <div class="filter-chip" data-type="error">Error</div>
-                <div class="filter-chip" data-type="context">Context</div>
+
+            <div>
+                <select id="filter-select" onchange="currentFilter = this.value; renderList();" class="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md text-xs outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer">
+                    <option value="all">All Categories</option>
+                    <option value="decision">Decision</option>
+                    <option value="architecture">Architecture</option>
+                    <option value="hack">Hack</option>
+                    <option value="command">Command</option>
+                    <option value="error">Error</option>
+                    <option value="context">Context</option>
+                </select>
             </div>
         </div>
-        <div class="memory-list" id="memory-list"></div>
-        <div class="sidebar-footer">
-            <span class="mem-count-badge" id="mem-count">0 entries</span>
-            <button class="btn-clear-all" onclick="openClearAllModal()">
+        
+        <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2" id="memory-list"></div>
+        
+        <div class="p-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <span class="text-xs text-zinc-500" id="mem-count">0 entries</span>
+            <button class="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 dark:border-red-900/40 rounded-md px-2 py-1 text-xs font-semibold flex items-center gap-1 transition-all" onclick="openClearAllModal()">
                 <span>Clear All</span>
             </button>
         </div>
     </div>
     
-    <div class="content-wrapper">
-        <div class="action-bar" id="action-bar" style="display: none;">
-            <button class="btn-delete" onclick="openDeleteModal()">
-                <span>Delete Memory</span>
-            </button>
+    <div class="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-950">
+        <div class="p-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-end bg-zinc-50 dark:bg-zinc-900/40 gap-3 min-h-[53px]">
+            <div id="action-bar" style="display: none;">
+                <button class="bg-red-600 hover:bg-red-700 text-white rounded-lg px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm" onclick="openDeleteModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                    </svg>
+                    <span>Delete Memory</span>
+                </button>
+            </div>
         </div>
-        <div class="content" id="content">
-            <div class="markdown-body" id="rendered-content">
-                <h1>Select a memory to view details</h1>
-                <p>Live preview connected to Tacit local server.</p>
+        <div class="flex-1 overflow-y-auto p-6 md:p-10">
+            <div class="max-w-3xl mx-auto markdown-body dark:prose-invert" id="rendered-content">
+                <h1 class="text-2xl font-bold mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-3">Select a memory to view details</h1>
+                <p class="text-zinc-500">Live preview connected to Tacit local server.</p>
             </div>
         </div>
     </div>
 
     <!-- Single Memory Delete Modal -->
-    <div class="modal-overlay" id="delete-modal">
-        <div class="modal-card">
-            <div class="modal-title">
+    <div class="modal-overlay fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none z-50 flex items-center justify-center p-4" id="delete-modal">
+        <div class="modal-card bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xl max-w-md w-full">
+            <div class="text-lg font-bold text-red-600 dark:text-red-400 mb-3 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
                 <span>Confirm Memory Deletion</span>
             </div>
-            <div class="modal-body" id="modal-memory-desc">
+            <div class="text-sm text-zinc-600 dark:text-zinc-400 mb-5" id="modal-memory-desc">
                 Are you sure you want to permanently delete this project memory node? This action cannot be undone.
             </div>
-            <div class="modal-actions">
-                <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
-                <button class="btn-confirm-delete" onclick="confirmDeleteMemory()">Delete Permanently</button>
+            <div class="flex justify-end gap-2.5">
+                <button class="px-3.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-md text-xs font-semibold transition-all" onclick="closeDeleteModal()">Cancel</button>
+                <button class="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold transition-all" onclick="confirmDeleteMemory()">Delete Node</button>
             </div>
         </div>
     </div>
 
     <!-- Clear All Memories Modal -->
-    <div class="modal-overlay" id="clear-all-modal">
-        <div class="modal-card">
-            <div class="modal-title">
-                <span>Clear Project Memories</span>
+    <div class="modal-overlay fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none z-50 flex items-center justify-center p-4" id="clear-all-modal">
+        <div class="modal-card bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xl max-w-md w-full">
+            <div class="text-lg font-bold text-red-600 dark:text-red-400 mb-3 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+                <span>Clear All Workspace Memories</span>
             </div>
-            <div class="modal-body">
+            <div class="text-sm text-zinc-600 dark:text-zinc-400 mb-5">
                 Are you <strong>ABSOLUTELY SURE</strong> you want to permanently delete memories for this project selection?
                 <br><br>
-                <span style="color: #ef4444;">This action cannot be undone.</span>
+                <span class="text-red-500 font-semibold">This action cannot be undone.</span>
             </div>
-            <div class="modal-actions">
-                <button class="btn-cancel" onclick="closeClearAllModal()">Cancel</button>
-                <button class="btn-confirm-delete" onclick="confirmClearAllMemories()">Clear Everything</button>
+            <div class="flex justify-end gap-2.5">
+                <button class="px-3.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-md text-xs font-semibold transition-all" onclick="closeClearAllModal()">Cancel</button>
+                <button class="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold transition-all" onclick="confirmClearAllMemories()">Clear Everything</button>
             </div>
         </div>
     </div>
 
     <!-- Add Memory Modal -->
-    <div class="modal-overlay" id="add-memory-modal">
-        <div class="modal-card" style="max-width: 600px; width: 90%;">
-            <div class="modal-title">
-                <span>Record New Tacit Knowledge</span>
+    <div class="modal-overlay fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none z-50 flex items-center justify-center p-4" id="add-memory-modal">
+        <div class="modal-card bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xl max-w-xl w-full">
+            <div class="flex items-center justify-between mb-3">
+                <div class="text-lg font-bold text-zinc-900 dark:text-white">
+                    <span>Record New Tacit Knowledge</span>
+                </div>
+                <button onclick="closeAddMemoryModal()" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
-            <div class="modal-body">
-                <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-                    Tacit stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
-                </p>
-                <form id="add-memory-form" onsubmit="submitNewMemory(event)">
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <div style="flex: 1;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Title</label>
-                            <input type="text" id="add-title" required style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. Resolved database connection pool exhaustion">
-                        </div>
-                        <div style="width: 150px;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Type</label>
-                            <select id="add-type" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;">
-                                <option value="decision">Decision</option>
-                                <option value="architecture">Architecture</option>
-                                <option value="hack">Hack</option>
-                                <option value="command">Command</option>
-                                <option value="error">Error</option>
-                                <option value="context">Context</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Summary (Short 1-sentence description)</label>
-                        <input type="text" id="add-summary" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="Brief summary of the decision/hack">
-                    </div>
-
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Detailed Content / Rationale</label>
-                        <textarea id="add-content" required style="width: 100%; height: 100px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; resize: vertical; font-family: inherit; line-height: 1.4;" placeholder="Provide the details, reasons, and workarounds."></textarea>
-                    </div>
-
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <div style="flex: 1;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Tags (Comma separated)</label>
-                            <input type="text" id="add-tags" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. database, performance, auth">
-                        </div>
-                        <div style="flex: 1;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Scope (File paths, comma separated)</label>
-                            <input type="text" id="add-scope" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none;" placeholder="e.g. /src/db.js, /src/server.js">
-                        </div>
-                    </div>
-
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <div style="flex: 1;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Parent Node IDs (Select multiple holding Ctrl/Cmd)</label>
-                            <select id="add-parents-select" multiple style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; height: 60px;">
-                                <!-- Dynamic options loaded on open -->
-                            </select>
-                        </div>
-                        <div style="width: 150px;">
-                            <label style="display: block; font-size: 11px; font-weight: 600; margin-bottom: 4px;">Impact</label>
-                            <select id="add-impact" style="width: 100%; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); color: var(--fg); border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;">
-                                <option value="high">High</option>
-                                <option value="medium" selected>Medium</option>
-                                <option value="low">Low</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px;">
-                        <button type="button" class="btn-cancel" onclick="closeAddMemoryModal()">Cancel</button>
-                        <button type="submit" class="btn-confirm-delete" style="background: var(--accent);">Record Memory</button>
-                    </div>
-                </form>
+            <div class="text-xs text-zinc-500 dark:text-zinc-400 mb-4 leading-relaxed">
+                Tacit stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
             </div>
+            <form id="add-memory-form" onsubmit="submitNewMemory(event)" class="space-y-4 text-xs">
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Title</label>
+                        <input type="text" id="add-title" required class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md outline-none focus:ring-1 focus:ring-cyan-500" placeholder="e.g. Resolved database connection pool exhaustion">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
+                        <select id="add-type" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md outline-none cursor-pointer focus:ring-1 focus:ring-cyan-500">
+                            <option value="decision">Decision</option>
+                            <option value="architecture">Architecture</option>
+                            <option value="hack">Hack</option>
+                            <option value="command">Command</option>
+                            <option value="error">Error</option>
+                            <option value="context">Context</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Summary (Short 1-sentence description)</label>
+                    <input type="text" id="add-summary" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md outline-none focus:ring-1 focus:ring-cyan-500" placeholder="Brief summary of the decision/hack">
+                </div>
+
+                <div>
+                    <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Detailed Content / Rationale</label>
+                    <textarea id="add-content" required class="w-full h-24 px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md outline-none resize-y focus:ring-1 focus:ring-cyan-500 leading-normal" placeholder="Provide the details, reasons, and workarounds."></textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Tags (Comma separated)</label>
+                        <input type="text" id="add-tags" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md outline-none focus:ring-1 focus:ring-cyan-500" placeholder="e.g. database, performance, auth">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Scope (File paths, comma separated)</label>
+                        <input type="text" id="add-scope" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-950 dark:text-zinc-50 rounded-md outline-none focus:ring-1 focus:ring-cyan-500" placeholder="e.g. /src/db.js, /src/server.js">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Parent Node IDs (Select multiple holding Ctrl/Cmd)</label>
+                        <select id="add-parents-select" multiple class="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md outline-none h-16">
+                            <!-- Dynamic options loaded on open -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Impact</label>
+                        <select id="add-impact" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md outline-none cursor-pointer focus:ring-1 focus:ring-cyan-500">
+                            <option value="high">High</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2.5 pt-2">
+                    <button type="button" class="px-3.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-md text-xs font-semibold transition-all" onclick="closeAddMemoryModal()">Cancel</button>
+                    <button type="submit" class="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-md text-xs font-semibold transition-all">Record Memory</button>
+                </div>
+            </form>
         </div>
     </div>
 
     <!-- CLI Reference Modal -->
-    <div class="modal-overlay" id="cli-modal">
-        <div class="modal-card" style="max-width: 600px; width: 90%;">
-            <div class="modal-title">
-                <span>Tacit CLI Quick Reference</span>
+    <div class="modal-overlay fixed inset-0 bg-black/60 backdrop-blur-sm opacity-0 pointer-events-none z-50 flex items-center justify-center p-4" id="cli-modal">
+        <div class="modal-card bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xl max-w-lg w-full">
+            <div class="flex items-center justify-between mb-3">
+                <div class="text-base font-bold text-zinc-900 dark:text-white">
+                    <span>Tacit CLI Quick Reference</span>
+                </div>
+                <button onclick="closeCliModal()" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
-            <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
-                <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+            <div class="modal-body max-h-[380px] overflow-y-auto text-xs space-y-3" style="margin-bottom: 12px;">
+                <p class="text-zinc-500 dark:text-zinc-400 leading-relaxed">
                     Use the global <code>tacit</code> binary in any project terminal to record or query decision graphs.
                 </p>
-                <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
+                <div class="space-y-3">
                     <div>
-                        <strong style="color: var(--accent);">1. Initialize Tacit Database</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit init</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">1. Initialize Tacit Database</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit init</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">2. Record Tacit Knowledge (With Parent Linkage)</strong>
-                        <p style="font-size: 11px; color: var(--fg-muted); margin-top: 2px;">
-                            Always link causal parents to create the ancestry graph:
-                        </p>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px; overflow-x: auto;">tacit remember "Resolved db connection exhaustion by raising pool to 30" \
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">2. Record Tacit Knowledge (With Parent Linkage)</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px] overflow-x-auto">tacit remember "Resolved db connection exhaustion by raising pool to 30" \
   --type decision \
   --tags "db,performance" \
   --parents 54bd72c1,a6a9dc1e</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">3. Visualize Causal DAG Tree</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit tree</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">3. Visualize Causal DAG Tree</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit tree</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">4. Trace Local Lineage (Ancestors & Descendants)</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit lineage &lt;node_id_or_prefix&gt;</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">4. Trace Local Lineage (Ancestors & Descendants)</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit lineage &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">5. View Full Memory Details</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit get &lt;node_id_or_prefix&gt;</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">5. View Full Memory Details</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit get &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">6. Delete a Specific Memory Node</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit delete &lt;node_id_or_prefix&gt;</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">6. Delete a Specific Memory Node</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit delete &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
-                        <strong style="color: var(--accent);">7. Global Update & Rule Refresh</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit update</pre>
+                        <strong class="text-cyan-600 dark:text-cyan-400 font-semibold block mb-0.5">7. Global Update & Rule Refresh</strong>
+                        <pre class="bg-zinc-100 dark:bg-zinc-950 p-2 border border-zinc-200 dark:border-zinc-800 rounded text-[10px]">tacit update</pre>
                     </div>
                 </div>
             </div>
-            <div class="modal-actions" style="margin-top: 15px;">
-                <button class="btn-cancel" onclick="closeCliModal()">Close</button>
+            <div class="flex justify-end pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <button class="px-3.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-md text-xs font-semibold transition-all" onclick="closeCliModal()">Close</button>
             </div>
         </div>
     </div>
 
-    <div class="connection-status" id="status">● Connected</div>
+    <div class="connection-status fixed bottom-4 right-4 px-3 py-1.5 rounded-full bg-green-600 dark:bg-green-700 text-white text-[10px] font-bold shadow-lg flex items-center gap-1.5 transition-all z-40 [&.disconnected]:bg-red-600 [&.disconnected]:dark:bg-red-700" id="status">● Connected</div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
@@ -826,9 +416,22 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         }
 
         function setTheme(theme, save = true) {
+            let actualTheme = theme;
+            if (theme === 'system') {
+                actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            if (actualTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
             document.documentElement.setAttribute('data-theme', theme);
             document.querySelectorAll('.theme-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-theme') === theme);
+                if (btn.getAttribute('data-theme') === theme) {
+                    btn.className = "theme-btn px-2 py-0.5 rounded text-[10px] bg-cyan-600 text-white font-semibold transition-all";
+                } else {
+                    btn.className = "theme-btn px-2 py-0.5 rounded text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-300/40 dark:hover:bg-zinc-700/60 transition-all cursor-pointer font-semibold";
+                }
             });
             if (save) {
                 localStorage.setItem('tacit_theme', theme);
@@ -1162,16 +765,6 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
         // Search event listener
         document.getElementById('search').addEventListener('input', renderList);
-
-        // Filter chips listeners
-        document.getElementById('filter-chips').addEventListener('click', (e) => {
-            const chip = e.target.closest('.filter-chip');
-            if (!chip) return;
-            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-            currentFilter = chip.getAttribute('data-type');
-            renderList();
-        });
 
         // Initialize Theme, Projects & WebSocket
         initTheme();
