@@ -181,8 +181,7 @@ To get Tacit running in your environment, execute the following commands in sequ
 ### Step 1: Install Tacit from source
 ```bash
 # Clone the repository
-git clone https://github.com/AlexLeoTz/project-memory-cortext.git
-git checkout main # or the current active branch
+git clone https://github.com/AlexLeoTz/tacit.git
 
 # Install globally on your machine (editable mode for active development)
 pip install -e .
