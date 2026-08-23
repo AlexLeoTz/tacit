@@ -575,7 +575,7 @@ def clear(
 
 @app.command(name="briefing")
 def briefing_cmd(
-    budget: int = typer.Option(2000, "--budget", "-b", help="Token budget cap for briefing"),
+    budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Generate intelligent relevance-ranked project briefing for agent bootstrapping."""
@@ -587,7 +587,7 @@ def briefing_cmd(
 
 @app.command(name="context")
 def context_cmd(
-    budget: int = typer.Option(2000, "--budget", "-b", help="Token budget cap for briefing"),
+    budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Alias for 'briefing' — generate relevance-ranked project briefing for agent bootstrapping."""

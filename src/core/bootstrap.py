@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .memory_node import MemoryNode
+from ..utils.config import Config
 
 
 # ==============================================================================
@@ -33,7 +34,7 @@ RECENCY_HALF_LIFE_DAYS = 180   # A memory loses half its recency score in 6 mont
 PENALTY_MAX = 0.30             # Max deduction when a neighbor was superseded
 PENALTY_HALF_LIFE_DAYS = 60    # The deduction fades over ~2 months
 
-TOKEN_BUDGET = 2000
+TOKEN_BUDGET = Config.TOKEN_BUDGET
 FULL_TIER_BUDGET_FRACTION = 0.60  # 60% of budget -> full content, rest -> one-liners
 MIN_FULL_ENTRIES = 3              # Always brief deeply on at least 3 nodes if available
 MAX_TAG_SHARE_IN_FULL = 0.5       # Diversity guard: max fraction of deep tier for 1 tag

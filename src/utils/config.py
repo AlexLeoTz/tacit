@@ -20,6 +20,7 @@ class Config:
     PREVIEW_WS_PORT: int = int(os.getenv("PREVIEW_WS_PORT", "4001"))
     MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio")
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "50"))
+    TOKEN_BUDGET: int = int(os.getenv("TACIT_TOKEN_BUDGET", "2000"))
     DUAL_WRITE: bool = os.getenv("TACIT_DUAL_WRITE", "true").lower() in ("true", "1", "yes")
 
     MEMORY_TYPES = [

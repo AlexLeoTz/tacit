@@ -84,7 +84,7 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
     @mcp.tool()
     def memory_context(
         timeframe: str = "all",
-        budget: int = 2000,
+        budget: Optional[int] = None,
         scope_hint: Optional[List[str]] = None,
         project: Optional[str] = None,
     ) -> str:

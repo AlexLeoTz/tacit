@@ -298,7 +298,7 @@ Merkle Root: {node.merkle_root}
     def handle_memory_context(
         self,
         timeframe: str = "all",
-        budget: int = 2000,
+        budget: Optional[int] = None,
         scope_hint: Optional[List[str]] = None,
         project: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -307,7 +307,7 @@ Merkle Root: {node.merkle_root}
         storage = self._resolve_storage(project)
         briefing_res = BootstrapEngine.generate_briefing(
             storage=storage,
-            budget=budget,
+            budget=budget if budget is not None else Config.TOKEN_BUDGET,
             scope_hint=scope_hint,
         )
         return briefing_res
