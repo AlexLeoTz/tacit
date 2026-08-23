@@ -429,12 +429,16 @@ def serve(
     ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open preview in default browser"),
 ):
     """Start real-time Markdown preview server with WebSocket live-reload."""
     storage = get_storage(project)
     root = Config.find_project_root(project)
     out_dir = Path(output) if output else Config.get_export_dir(root)
     server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(f"http://localhost:{port}")
     server.start(block=True)
 
 
@@ -444,7 +448,7 @@ def dashboard(
     ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
-    open_browser: bool = typer.Option(False, "--open", help="Automatically open dashboard in default browser"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open dashboard in default browser"),
 ):
     """Start visual Project Memory Dashboard web interface with multi-project support and live-reload."""
     storage = get_storage(project)
