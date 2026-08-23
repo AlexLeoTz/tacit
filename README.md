@@ -1,6 +1,6 @@
 # Tacit
 
-![Tacit Logo](logo.jpg)
+<img src="logo.jpg" alt="Tacit Logo" width="120" />
 
 ```text
   _______   _    _____ _____ _______ 
