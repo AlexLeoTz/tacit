@@ -1,147 +1,38 @@
-# Tacit
-
-<img src="logo.jpg" alt="Tacit Logo" width="120" />
-
-```text
-  _______   _    _____ _____ _______ 
- |__   __| / \  / ____|_   _|__   __|
-    | |   / _ \| |      | |    | |   
-    | |  / ___ \ |___  _| |_   | |   
-    |_| /_/   \_\____|_____|   |_|   
-```
-
-> **Persistent, immutable, timestamped institutional memory and tacit knowledge layer for AI coding agents.**  
-Survives context window wipes, model switches, compaction, and chat resets.
-
-> [!WARNING]
-> **Development Preview**: Tacit is currently in active development. Features, database schemas, and CLI commands may change or break frequently. Please back up your memories before upgrading.
+<div align="center">
+  <img src="logo.jpg" alt="Tacit Logo" width="120" />
+  <h1>Tacit</h1>
+  <p><strong>The Institutional Memory Layer & Decision Lineage Engine for AI Coding Agents</strong></p>
+  <p>
+    <a href="#1-quick-start--installation">Quick Start</a> •
+    <a href="#2-ai-agent-integration-mcp-setup">MCP Setup</a> •
+    <a href="#3-agent-master-prompt--rules-automated">Master Rules</a> •
+    <a href="#4-cli-usage--commands">CLI Commands</a> •
+    <a href="#6-mcp-tools-reference">MCP Tools</a> •
+    <a href="#docs">Documentation</a>
+  </p>
+</div>
 
 ---
 
-## Motivation and The Problem It Solves
+## Why Tacit?
 
-### The Problem: AI Amnesia in Modern Software Engineering
-Coding agents/harnesses (Claude, Cursor, Antigravity, Deepseek-Harness, Codex) possess reasoning capabilities, but suffer from **project amnesia**:
-1. **Context Window Limits & Compaction Loss**: As conversations grow, context is summarized or wiped. The agent forgets why a specific architectural decision was made 20 turns ago.
-2. **Session Resets & Model Switching**: Starting a new chat destroys working institutional memory.
-3. **Repeated Mistakes & Bug Regressions**: Agents often re-introduce the same bugs, test the same failed hypotheses, or undo undocumented workarounds ("hacks") previously resolved by another session or teammate.
-4. **Scattered Tacit Knowledge**: Critical deployment commands, environment quirks, and architectural caveats live only in chat histories rather than in an indexed, verifiable repository.
+AI coding assistants (Claude Code, Cursor, Antigravity, OpenCode) suffer from **context compaction and session amnesia**:
+- When chats reset or contexts compress, the model loses the **"why"** behind architectural choices.
+- Undocumented workarounds (*"hacks"*) get silently reverted, causing bug regressions.
+- Decisions get updated or reversed over time, and flat memory stores poison agent context with obsolete contradictory advice.
 
-### What is Tacit?
-**Tacit** is a local institutional memory layer for AI software engineers. It works like Git, but for project decisions instead of source code. It runs locally as a Model Context Protocol (MCP) server, storing memories in an SQLite database for sub-millisecond search, and syncs them to plain Markdown files in your repository.
-
-* **Immutable Knowledge DAG**: Every decision, command, hack, and fix is stored with a SHA-256 content hash and a Merkle root calculated from its parent nodes, creating a cryptographic audit trail.
-* **Fast Full-Text Retrieval**: Utilizes SQLite FTS5 for sub-millisecond keyword and BM25 searches.
-* **Bootstrapping**: Agents query recent context on session startup to align with past design decisions.
-* **Local Web Dashboard**: A live-reloading UI to search, audit, filter, and insert project memories directly.
-
-> [!NOTE]
-> **Why Local Ownership Matters**: You can start a completely fresh session or migrate to a brand new coding harness, and your assistant will still instantly access all engineering decisions and institutional knowledge recorded since the first day of development. While model intelligence lives in a third-party cloud, its contributions to your project's tacit knowledge stay locally owned by your team.
-
----
-
-### Core Concepts: Tacit Knowledge & Causal Node DAGs
-
-To get the most value out of Tacit, both developers and AI agents must understand what Tacit stores and how it structures knowledge:
-
-> [!IMPORTANT]
-> **What Tacit DOES NOT Store**:
-> * **No Chat Histories**: Tacit does not log your conversation transcripts or raw prompt histories.
-> * **No Source Code Files**: Tacit does not index your repository's raw codebase files.
-> 
-> **What Tacit DOES Store (Tacit Knowledge)**:
-> Tacit exclusively records **Tacit / Institutional Knowledge**: the undocumented "why" behind your code. This includes architectural constraints, tricky workarounds (hacks), specific environment dependencies, critical operational commands, and resolved bug caveats.
-
-#### The Parent-Child Node Relationship
-Tacit structures knowledge as a **Directed Acyclic Graph (DAG)** of **Memory Nodes**:
-* **Parent Nodes (Foundations)**: Past decisions, patterns, or limitations that set the initial context (e.g., *"Migrated to an async backend request pipeline"*).
-* **Child Nodes (Derived Decisions)**: Subsequent decisions, hotfixes, or workarounds triggered because of a parent context (e.g., *"Resolved connection pool exhaustion by raising limit to 30"*).
-
-By explicitly linking parents and children, Tacit builds a mathematical causality tree. When an agent queries a decision, Tacit doesn't just retrieve the node, but walks up the tree to tell the agent the entire ancestral history.
-
----
-
-### Real-World Example: Solving "AI Amnesia" in Practice
-
-Imagine starting a **fresh, blank chat session** (zero chat history) and asking your coding harness:
-> *"Why did we change the database pool size and add connection timeouts?"*
-
-Without Tacit, the agent is blind. You would have to manually explain to it what it knew in the previous session. With Tacit, the agent automatically executes the following tools under the hood to resolve the answer in seconds:
-
-#### 1. Bootstrapping Context
-At the start of the session, the agent calls `memory_context(timeframe="week")` to load recent workspace decisions into its system context:
-```json
-{
-  "Decisions": [
-    { "id": "9385134c", "title": "Decision: Resolved database connection pool exhaustion under load" },
-    { "id": "54bd72c1", "title": "Decision: Enabled transaction middleware for all API writes" }
-  ]
-}
-```
-
-#### 2. Targeted Querying
-The agent performs a quick search using `memory_search(query="database pool")` to locate the exact node:
-```json
-{
-  "id": "9385134c-eb52-4d70-824a-a21b23033df7",
-  "title": "Decision: Resolved database connection pool exhaustion under load",
-  "tags": ["database", "performance", "bugfix"]
-}
-```
-
-#### 3. Fetching Node & Lineage
-The agent queries the full memory node via `memory_get(node_id="9385134c-eb52-4d70-824a-a21b23033df7")`, retrieving the complete content and its dynamic Merkle DAG lineage:
-```text
-==================================================
-MEMORY NODE: 9385134c-eb52-4d70-824a-a21b23033df7
-Type: DECISION | Impact: MEDIUM | Status: active
-Recorded: 2026-08-21 21:14:11 E. Africa Standard Time by ai-agent
-Title: Decision: Resolved database connection pool exhaustion under load
-==================================================
-
-CONTENT:
-Resolved database connection pool exhaustion by increasing max pool size
-from 5 to 30, implementing a 5000ms query timeout, and wrapping active
-transactions in try/finally blocks to guarantee connection release.
-This prevents HTTP workers from hanging when concurrent database queries
-spike during high traffic.
-
-TAXONOMY & LINEAGE:
-Tags: database, performance, bugfix
-Scope: /src/db/connection.js, /src/middleware/transaction.js
-Parents: 54bd72c1-3a34-4895-b233-0d7dde557eb4
-
-DECISION TREE / CAUSALITY:
-CAUSAL ANCESTORS (Foundations):
-  └── [decision] Decision: Migrated backend to async request handling (`a6a9dc1e`)
-  └── [decision] Decision: Implemented multi-tenant connection mapping (`da20d017`)
-  └── [decision] Decision: Configured read-replicas for analytics queries (`5e839b22`)
-  └── [decision] Decision: Enabled transaction middleware for all API writes (`54bd72c1`)
-==================================================
-```
-
-#### 4. The Agent's Answer
-Equipped with this structural and historical background, the agent immediately constructs a correct answer with no search latency or hallucination:
-> We increased the database connection pool size from 5 to 30 and implemented query timeouts to resolve connection pool exhaustion under high concurrency load.
-> 
-> **Why it was necessary:**
-> * **Async Request Load**: Migrating the backend to async request handling (`a6a9dc1e`) allowed for high concurrency, quickly saturating the original 5-connection pool limit.
-> * **Connection Leak**: The transaction middleware (`54bd72c1`) did not guarantee connection release when write queries failed, leaking active database connections.
-> * **The Solution**: Raising the pool limit to 30 accommodates peak concurrency, adding a 5000ms timeout prevents queries from hanging indefinitely, and wrapping transactions in try/finally blocks guarantees that connections are always returned to the pool.
-
----
-
-## Architecture Overview
+**Tacit** gives AI coding assistants an **immutable, content-addressed institutional memory layer with causal supersedence and relevance-ranked bootstrapping**:
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
- │                     AI Coding Agents & Editors                   │
- │  (Antigravity, Cursor, Claude, Deepseek-Harness, Opencode)       │
+ │                     AI Coding Agent                              │
+ │            (Claude Code / Cursor / Antigravity)                  │
  └───────────────────────────────┬──────────────────────────────────┘
-                                 │ Standard MCP Protocol (stdio / SSE)
-                                 ▼
- ┌──────────────────────────────────────────────────────────────────┐
- │                   FastMCP Server Layer (FastMCP)                 │
+                                 │
+                   Model Context Protocol (MCP)
+                                 │
+ ┌───────────────────────────────┴──────────────────────────────────┐
+ │                     Tacit Local Engine                           │
  │   Tools: memory_add, memory_search, memory_get, memory_context   │
  └───────────────────────────────┬──────────────────────────────────┘
                                  │
@@ -155,7 +46,7 @@ Equipped with this structural and historical background, the agent immediately c
          ▼                        ▼                        ▼
  ┌──────────────────────────────────────────────────────────────────┐
  │              Local Project Directory (.tacit/)                   │
- │              - memory.db (Encrypted / WAL SQLite)                │
+ │              - memory.db (WAL SQLite with Typed Edges)           │
  │              - Merkle Hash Tree & Causal Ancestry DAG            │
  └──────────────────────────────────────────────────────────────────┘
 ```
@@ -163,11 +54,11 @@ Equipped with this structural and historical background, the agent immediately c
 ---
 
 ## Table of Contents
-1. [Installation](#1-installation)
+1. [Quick Start & Installation](#1-quick-start--installation)
 2. [AI Agent Integration (MCP Setup)](#2-ai-agent-integration-mcp-setup)
 3. [Agent Master Prompt & Rules](#3-agent-master-prompt--rules-automated)
 4. [CLI Usage & Commands](#4-cli-usage--commands)
-5. [Live Markdown Preview Server](#5-live-markdown-preview-server)
+5. [Live Markdown Preview Server & Dashboard](#5-live-markdown-preview-server--dashboard)
 6. [MCP Tools Reference](#6-mcp-tools-reference)
 7. [Multi-Project Support](#7-multi-project-support)
 8. [Testing](#8-testing)
@@ -182,6 +73,7 @@ To get Tacit running in your environment, execute the following commands in sequ
 ```bash
 # Clone the repository
 git clone https://github.com/AlexLeoTz/tacit.git
+cd tacit
 
 # Install globally on your machine (editable mode for active development)
 pip install -e .
@@ -232,12 +124,12 @@ Tacit runs as a local MCP server that automatically detects whichever project di
 
 ---
 
-### B. Manual MCP Configuration & Client Setup
+### Manual MCP Configuration & Client Setup
 
-Tacit runs locally as an **STDIO MCP server**: a local background process started and communicated with via standard input/output streams by your AI coding client.
+Tacit runs locally as an **STDIO MCP server**: a local background process communicated with via standard input/output streams by your AI coding client.
 
 > [!NOTE]
-> **Harness Compatibility**: Tacit is thoroughly tested and verified to work natively in **Antigravity CLI**, **DeepSeek Harness**, and **Claude Code**. If you encounter issues running it in other environments, please file a bug report.
+> **Harness Compatibility**: Tacit is thoroughly tested and verified to work natively in **Antigravity CLI**, **Claude Desktop**, **Claude Code**, and **Cursor**.
 
 #### 1. Claude Code & Claude Desktop
 Add this to your `claude_desktop_config.json` (on Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
@@ -257,36 +149,10 @@ Add this to your `claude_desktop_config.json` (on Windows: `%APPDATA%\Claude\cla
 Go to **Settings** -> **Features** -> **MCP**, click **+ Add New MCP Server**, and configure:
 * **Name**: `tacit`
 * **Type**: `stdio`
-* **Command**: `tacit mcp` (or specify command `tacit` and argument `mcp`)
-
-#### 3. DeepSeek Harness
-DeepSeek Harness loads MCP configurations declaratively. Add this to your project configuration file (e.g. `dsh-config.yaml`):
-
-```yaml
-- id: mcp-tacit
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: tacit
-    transport: stdio
-    command: tacit
-    args: ['mcp']
-```
-
-#### 4. ChatGPT Codex
-Add this entry to your local Codex developer configuration layer:
-
-```json
-{
-  "mcpServers": {
-    "tacit": {
-      "command": "tacit",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+* **Command**: `tacit mcp`
 
 ---
+
 ## 3. Agent Master Prompt & Rules (Automated)
 
 **You do not need to manually create rule files.**
@@ -303,22 +169,27 @@ If you ever need to inspect or customize the rules, here is the generated templa
 
 You are connected to Tacit to preserve engineering decisions across chat resets.
 
+## Critical Concept (What to Store vs What NOT to Store):
+* **ONLY Store Distilled Tacit Knowledge**: Record non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
+* **NEVER Store Raw Code or Chat Transcripts**: Do not pollute the memory database with raw source code files, copy-pasted logs, or complete conversation histories. Keep entries high-density and concise.
+
 ## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
 2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
-   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']).
+   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths actually exist in the codebase.
    - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+   - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
 3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
    - At the conclusion of any non-trivial coding task, ask yourself:
      "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
-   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`).
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`). If invalidating a past decision, specify `supersedes=[<id>]`.
    - If NO (e.g., routine refactor or typo fix), do not pollute project memory.
 ```
 
 ---
 
-## 3. CLI Usage & Commands
+## 4. CLI Usage & Commands
 
 You can run `tacit` in **any** project directory on your machine. It automatically discovers and initializes the `.tacit/` directory for that workspace.
 
@@ -328,6 +199,15 @@ You can run `tacit` in **any** project directory on your machine. It automatical
 tacit init
 ```
 
+### View Relevance-Ranked Session Briefing
+```bash
+# Generates intelligent DAG-centrality and recency-decayed project briefing
+tacit briefing
+
+# Or with custom token budget
+tacit briefing --budget 1500
+```
+
 ### Record a Memory
 ```bash
 # Add a decision
@@ -335,6 +215,14 @@ tacit remember "Migrated authentication from sessions to JWT with 15-minute rota
   --type decision \
   --tags "auth,security,jwt" \
   --impact high
+
+# Add a decision that supersedes a previous one
+tacit remember "Reverted to sessions due to JWT refresh rotation vulnerabilities" \
+  --type decision \
+  --tags "auth,security,session" \
+  --impact high \
+  --supersedes 4a9f1234 \
+  --relation-note "JWT token leakage risk in distributed workers"
 
 # Add a critical command
 tacit remember "docker compose -f docker-compose.prod.yml up -d --build" \
@@ -355,6 +243,21 @@ tacit search "JWT"
 
 # Filter by type
 tacit search "docker" --type command
+```
+
+### Verify Cryptographic Integrity
+```bash
+# Recomputes and checks SHA-256 hashes and Merkle lineage across all nodes
+tacit verify
+```
+
+### Lifecycle Management (Supersede & Retract)
+```bash
+# Explicitly supersede a memory node with a successor
+tacit supersede <old_node_id> --by <new_node_id> --reason "Revised architecture"
+
+# Retract an erroneously recorded entry
+tacit retract <node_id> --reason "Never deployed"
 ```
 
 ### View Recent Memories
@@ -407,8 +310,6 @@ tacit clear
 
 ### Visualizing Causal DAGs & Lineage
 
-Tacit provides built-in tools to inspect project history and dependencies:
-
 ```bash
 # Renders the entire project decision DAG as a nested ASCII tree
 tacit tree
@@ -416,34 +317,6 @@ tacit tree
 # Traces causal foundations (ancestors) and derived decisions (descendants) for a specific node
 tacit lineage 4a9f
 ```
-
-#### Real-World Lineage Example:
-To see Tacit's lineage tracing in action, running `tacit lineage 54bd72c1` outputs the local decision dependency structure:
-
-```text
-┌─────────────────────────────── Memory Causal Lineage ────────────────────────────────┐
-│ Causal Lineage for: Decision: Enabled transaction middleware for all API writes      │
-│                                                                                      │
-│ Ancestors (Causal Foundations):                                                      │
-│   └──  Decision: Migrated backend to async request handling (a6a9dc1e)               │
-│   └──  Decision: Implemented multi-tenant connection mapping (da20d017)              │
-│   └──  Decision: Configured read-replicas for analytics queries (5e839b22)           │
-│   │                                                                                      │
-│ ► Target Node:  Decision: Enabled transaction middleware for all API writes (54bd)   │
-│                                                                                      │
-│ Descendants (Derived Decisions/Hacks):                                               │
-│   └──  Decision: Resolved database connection pool exhaustion under load (9385134c)  │
-└──────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Value for Developers & Coding harness**:
-Instead of reading through unrelated commit logs or forgetting why a fix was made, you instantly trace the context: the **Database Pool Exhaustion Fix (`9385134c`)** was built on top of the **Enabled transaction middleware (`54bd72c1`)**, which was itself caused by components introduced in the **Read-replicas configuration (`5e839b22`)**, the **Multi-tenant mapping (`da20d017`)**, and the **Async backend migration (`a6a9dc1e`)**.
-
----
-
-### Pre-Flight Semantic Auto-Linking
-
-When recording a memory (`tacit remember` or `memory_add`), Tacit checks for parent relationships. If no parent links are supplied, the core runs a **pre-flight semantic similarity lookup** on existing memories. If a highly relevant context node is found, it automatically links it as a parent node, ensuring DAG continuity without manual intervention.
 
 ---
 
@@ -457,14 +330,7 @@ tacit serve
 
 # 2. Specify custom ports for both HTTP and WebSocket
 tacit serve --port 3000 --ws-port 3001
-
-# 3. Export to Markdown files and launch live preview immediately with custom ports
-tacit export --preview --port 3000 --ws-port 3001
 ```
-
-> **Automatic Port Conflict Resolution**: If a port is already taken, Tacit automatically scans and binds to the next available free port without crashing.
-
-Open your browser at `http://localhost:4000` (or your configured port) to interact with your project memories visually.
 
 ---
 
@@ -474,11 +340,11 @@ When connected via MCP, AI agents have access to the following 6 tools:
 
 | Tool | Purpose | Key Arguments |
 |---|---|---|
-| `memory_add` | Persist a new immutable decision, command, hack, architecture, or error. | `content`, `type`, `summary`, `tags`, `impact`, `parents` |
+| `memory_add` | Persist a new immutable decision, command, hack, architecture, or error. Supports superseding past decisions. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
 | `memory_search` | High-speed FTS5 full-text search. | `query`, `type`, `tags`, `limit` |
-| `memory_get` | Fetch the full markdown content & Merkle lineage by ID. | `node_id` |
+| `memory_get` | Fetch the full markdown content & Merkle lineage by ID. Displays alert banners if superseded/retracted. | `node_id` |
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
-| `memory_context` | Bootstrap an AI agent session with organized project knowledge. | `timeframe` (`session`, `week`, `month`, `all`) |
+| `memory_context` | Generate an intelligent relevance-ranked, token-budgeted project briefing (DAG centrality + impact + recency decay). | `budget`, `scope_hint`, `timeframe` |
 | `memory_projects`| List all registered project workspaces across your machine. | None |
 
 > **Safety Notice**: Deletion is intentionally restricted to human developers via the CLI (`tacit delete <id>`) or Dashboard UI to prevent AI agents from accidentally erasing historical institutional memory.
@@ -510,5 +376,3 @@ pytest tests/ -v
 ## License
 
 MIT License.
-
-
