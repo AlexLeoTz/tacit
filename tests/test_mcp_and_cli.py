@@ -51,7 +51,7 @@ def test_mcp_add_and_search(mcp_fixture):
     # Test memory_context handler
     context_res = handlers.handle_memory_context("week")
     assert context_res["count"] == 1
-    assert "Decisions" in context_res["formatted"]
+    assert "DECISION" in context_res["formatted"] or "Core context" in context_res["formatted"]
 
 
 def test_cli_commands():

@@ -53,8 +53,10 @@ class MemoryMCPHandlers:
         scope: Optional[List[str]] = None,
         impact: str = "medium",
         parents: Optional[List[str]] = None,
+        supersedes: Optional[List[str]] = None,
         related: Optional[List[str]] = None,
         author: str = "ai-agent",
+        relation_note: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         project: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -63,12 +65,13 @@ class MemoryMCPHandlers:
         tags = tags or []
         scope = scope or []
         parents = parents or []
+        supersedes = supersedes or []
         related = related or []
         metadata = metadata or {}
 
         # Pre-flight check: If agent didn't provide parents, check for existing similar memories
         linked_hint = ""
-        if not parents:
+        if not parents and not supersedes:
             pre_flight_query = title or summary or content[:100]
             existing_matches = storage.search_full_text(query=pre_flight_query, limit=3, memory_type=type)
             if existing_matches:
@@ -97,8 +100,13 @@ class MemoryMCPHandlers:
             metadata=metadata,
         )
 
-        success = storage.add_memory(node)
+        success = storage.add_memory(
+            node,
+            supersedes=supersedes if supersedes else None,
+            relation_reason=relation_note,
+        )
         proj_label = f" (Project: {project})" if project else ""
+        sup_label = f" [Supersedes: {', '.join(f'`{s[:8]}`' for s in supersedes)}]" if supersedes else ""
         if success:
             return {
                 "success": True,
@@ -106,8 +114,9 @@ class MemoryMCPHandlers:
                 "summary": node.summary,
                 "type": node.type,
                 "parents": parents,
+                "supersedes": supersedes,
                 "content_hash": node.content_hash,
-                "message": f"Memory recorded [{node.type}]{proj_label}: {node.summary} (ID: {node.id}){linked_hint}",
+                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}",
             }
         else:
             return {
@@ -202,14 +211,31 @@ class MemoryMCPHandlers:
 
         lineage_block = "\n".join(ancestry_tree_lines)
 
+        # Status alert banner if node is not active
+        status_banner = ""
+        if node.status == "superseded":
+            # Search for successor edge or event
+            edges = storage.get_edges()
+            successor_edges = [e for e in edges if e.get("parent_id") == node.id and e.get("relation") == "supersedes"]
+            if successor_edges:
+                succ = successor_edges[0]
+                succ_id = succ.get("child_id", "unknown")
+                succ_node = storage.get_memory(succ_id)
+                succ_title = f' "{succ_node.title or succ_node.summary}"' if succ_node else ""
+                reason_str = f': "{succ.get("reason")}"' if succ.get("reason") else ""
+                status_banner = f"\n⚠️ SUPERSEDED by {succ_id[:8]}{succ_title}{reason_str}\n(This entry is kept for historical lineage; do NOT treat as active guidance.)\n"
+            else:
+                status_banner = "\n⚠️ SUPERSEDED: This decision has been superseded by a newer entry.\n"
+        elif node.status == "retracted":
+            status_banner = "\n⚠️ RETRACTED: This entry was recorded in error or invalidated.\n"
+
         date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
         formatted = f"""==================================================
 MEMORY NODE: {node.id}
-Type: {node.type.upper()} | Impact: {node.impact.upper()} | Status: {node.status}
+Type: {node.type.upper()} | Impact: {node.impact.upper()} | Status: {node.status.upper()}
 Recorded: {date_str} by {node.author}
 Title: {node.title}
-==================================================
-
+=================================================={status_banner}
 SUMMARY:
 {node.summary}
 
@@ -270,35 +296,21 @@ Merkle Root: {node.merkle_root}
         }
 
     def handle_memory_context(
-        self, timeframe: str = "week", project: Optional[str] = None
+        self,
+        timeframe: str = "all",
+        budget: int = 2000,
+        scope_hint: Optional[List[str]] = None,
+        project: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Aggregate structured memory context for agent session initialization."""
+        """Aggregate relevance-ranked, token-budgeted institutional briefing for agent session bootstrap."""
+        from ..core.bootstrap import BootstrapEngine
         storage = self._resolve_storage(project)
-        temporal = TemporalSearch(storage)
-        memories = temporal.get_by_timeframe(timeframe=timeframe, limit=100)
-        if not memories:
-            return {
-                "count": 0,
-                "timeframe": timeframe,
-                "formatted": f"# Project Institutional Memory\n\nNo recent memories found for timeframe '{timeframe}'.",
-            }
-
-        grouped = temporal.group_by_type(memories)
-        lines = [f"# Project Institutional Memory (Timeframe: {timeframe.capitalize()})\n"]
-
-        category_order = ["decision", "architecture", "hack", "error", "command", "context"]
-        for cat in category_order:
-            nodes = grouped.get(cat, [])
-            if nodes:
-                lines.append(f"\n## {cat.capitalize()}s ({len(nodes)})")
-                for node in nodes[:5]:
-                    lines.append(f"- **{node.title or node.summary}**: {node.summary} [`{node.id[:8]}`]")
-
-        return {
-            "count": len(memories),
-            "timeframe": timeframe,
-            "formatted": "\n".join(lines),
-        }
+        briefing_res = BootstrapEngine.generate_briefing(
+            storage=storage,
+            budget=budget,
+            scope_hint=scope_hint,
+        )
+        return briefing_res
 
     def handle_memory_projects(self) -> Dict[str, Any]:
         """List all discovered / registered project workspaces and their memory counts."""

@@ -4,10 +4,12 @@ from .memory_node import MemoryNode
 from .memory_dag import MemoryDAG
 from .merkle_tree import MerkleTree
 from .storage import MemoryStorage
+from .bootstrap import BootstrapEngine
 
 __all__ = [
     "MemoryNode",
     "MemoryDAG",
     "MerkleTree",
     "MemoryStorage",
+    "BootstrapEngine",
 ]

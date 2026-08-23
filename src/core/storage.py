@@ -2,7 +2,7 @@
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import threading
 
 from .memory_node import MemoryNode
@@ -53,6 +53,29 @@ class MemoryStorage:
                 """)
 
                 conn.execute("""
+                    CREATE TABLE IF NOT EXISTS edges (
+                        child_id TEXT NOT NULL,
+                        parent_id TEXT NOT NULL,
+                        relation TEXT NOT NULL DEFAULT 'derives_from',
+                        reason TEXT,
+                        created_at REAL NOT NULL,
+                        created_by TEXT NOT NULL DEFAULT 'agent',
+                        PRIMARY KEY (child_id, parent_id, relation)
+                    )
+                """)
+
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS lifecycle_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        node_id TEXT NOT NULL,
+                        event TEXT NOT NULL,
+                        actor TEXT NOT NULL DEFAULT 'agent',
+                        reason TEXT,
+                        at REAL NOT NULL
+                    )
+                """)
+
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_timestamp 
                     ON memories(timestamp)
                 """)
@@ -60,6 +83,11 @@ class MemoryStorage:
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_type 
                     ON memories(type)
+                """)
+
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_status 
+                    ON memories(status)
                 """)
 
                 conn.execute("""
@@ -147,8 +175,13 @@ class MemoryStorage:
         except Exception:
             pass
 
-    def add_memory(self, node: MemoryNode) -> bool:
-        """Add memory node to SQLite database, update FTS index, and write markdown file."""
+    def add_memory(
+        self,
+        node: MemoryNode,
+        supersedes: Optional[List[str]] = None,
+        relation_reason: Optional[str] = None,
+    ) -> bool:
+        """Add memory node to SQLite database, update FTS index, record edges, handle supersedence, and write markdown file."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -166,6 +199,47 @@ class MemoryStorage:
                         :status, :content_hash, :merkle_root, :metadata
                     )
                 """, data)
+
+                # Record derives_from edges
+                for p_id in node.parents:
+                    try:
+                        conn.execute("""
+                            INSERT OR IGNORE INTO edges (child_id, parent_id, relation, reason, created_at, created_by)
+                            VALUES (?, ?, 'derives_from', ?, ?, ?)
+                        """, (node.id, p_id, relation_reason, node.timestamp, node.author))
+                    except Exception:
+                        pass
+
+                # Record created lifecycle event
+                try:
+                    conn.execute("""
+                        INSERT INTO lifecycle_events (node_id, event, actor, reason, at)
+                        VALUES (?, 'created', ?, ?, ?)
+                    """, (node.id, node.author, f"Node created: {node.summary}", node.timestamp))
+                except Exception:
+                    pass
+
+                # Handle explicit supersedes
+                if supersedes:
+                    for sup_id in supersedes:
+                        # Flip target memory status to superseded
+                        conn.execute("UPDATE memories SET status = 'superseded' WHERE id = ?", (sup_id,))
+                        # Insert supersedes edge
+                        try:
+                            conn.execute("""
+                                INSERT OR REPLACE INTO edges (child_id, parent_id, relation, reason, created_at, created_by)
+                                VALUES (?, ?, 'supersedes', ?, ?, ?)
+                            """, (node.id, sup_id, relation_reason, node.timestamp, node.author))
+                        except Exception:
+                            pass
+                        # Log lifecycle event
+                        try:
+                            conn.execute("""
+                                INSERT INTO lifecycle_events (node_id, event, actor, reason, at)
+                                VALUES (?, 'superseded', ?, ?, ?)
+                            """, (sup_id, node.author, relation_reason or f"Superseded by {node.id}", node.timestamp))
+                        except Exception:
+                            pass
 
                 if self._fts_available:
                     tags_str = " ".join(node.tags)
@@ -323,8 +397,109 @@ class MemoryStorage:
             finally:
                 conn.close()
 
+    def get_active_memories(self, limit: int = 1000) -> List[MemoryNode]:
+        """Get all active memories (excluding superseded or retracted nodes)."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute("""
+                    SELECT * FROM memories 
+                    WHERE status = 'active' OR status IS NULL
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (limit,)).fetchall()
+                return [MemoryNode.from_dict(dict(row)) for row in rows]
+            finally:
+                conn.close()
+
+    def get_edges(self) -> List[Dict[str, Any]]:
+        """Get all relational graph edges."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute("SELECT * FROM edges").fetchall()
+                return [dict(row) for row in rows]
+            except Exception:
+                return []
+            finally:
+                conn.close()
+
+    def get_lifecycle_events(self, node_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get lifecycle history events for a node or entire project."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                if node_id:
+                    rows = conn.execute(
+                        "SELECT * FROM lifecycle_events WHERE node_id = ? ORDER BY at ASC",
+                        (node_id,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM lifecycle_events ORDER BY at ASC"
+                    ).fetchall()
+                return [dict(row) for row in rows]
+            except Exception:
+                return []
+            finally:
+                conn.close()
+
+    def retract_memory(self, node_id: str, reason: str = "", actor: str = "human") -> bool:
+        """Mark a memory node as retracted (erroneous/invalidated) while preserving audit trail."""
+        from datetime import datetime, timezone
+        now_ts = datetime.now(timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.execute("UPDATE memories SET status = 'retracted' WHERE id = ?", (node_id,))
+                if cursor.rowcount > 0:
+                    try:
+                        conn.execute("""
+                            INSERT INTO lifecycle_events (node_id, event, actor, reason, at)
+                            VALUES (?, 'retracted', ?, ?, ?)
+                        """, (node_id, actor, reason or "Retracted entry", now_ts))
+                    except Exception:
+                        pass
+                    conn.commit()
+                    return True
+                return False
+            finally:
+                conn.close()
+
+    def supersede_memory(
+        self,
+        target_id: str,
+        by_id: str,
+        reason: str = "",
+        actor: str = "human",
+    ) -> bool:
+        """Explicitly supersede a memory node with a newer memory node."""
+        from datetime import datetime, timezone
+        now_ts = datetime.now(timezone.utc).timestamp()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.execute("UPDATE memories SET status = 'superseded' WHERE id = ?", (target_id,))
+                if cursor.rowcount > 0:
+                    try:
+                        conn.execute("""
+                            INSERT OR REPLACE INTO edges (child_id, parent_id, relation, reason, created_at, created_by)
+                            VALUES (?, ?, 'supersedes', ?, ?, ?)
+                        """, (by_id, target_id, reason, now_ts, actor))
+                        conn.execute("""
+                            INSERT INTO lifecycle_events (node_id, event, actor, reason, at)
+                            VALUES (?, 'superseded', ?, ?, ?)
+                        """, (target_id, actor, reason or f"Superseded by {by_id}", now_ts))
+                    except Exception:
+                        pass
+                    conn.commit()
+                    return True
+                return False
+            finally:
+                conn.close()
+
     def clear_all_memories(self) -> int:
-        """Delete all memories in this project database and clean markdown category directories."""
+        """Delete all memories in this project database, clearing edges and markdown category directories."""
         with self._lock:
             conn = self._get_connection()
             try:
@@ -332,6 +507,11 @@ class MemoryStorage:
                 count = cursor.rowcount
                 if self._fts_available:
                     conn.execute("DELETE FROM memories_fts")
+                try:
+                    conn.execute("DELETE FROM edges")
+                    conn.execute("DELETE FROM lifecycle_events")
+                except Exception:
+                    pass
                 conn.commit()
                 # Clean markdown files
                 for t in ("decision", "architecture", "hack", "command", "error", "context"):

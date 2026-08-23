@@ -90,15 +90,16 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **NEVER Store Raw Code or Chat Transcripts**: Do not pollute the memory database with raw source code files, copy-pasted logs, or complete conversation histories. Keep entries high-density and concise.
 
 ## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(timeframe="week")` to load existing decisions, active hacks, and solved errors into your context.
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
 2. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
    - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths actually exist in the codebase.
    - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
+   - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
 3. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
    - At the conclusion of any non-trivial coding task, ask yourself:
      "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
-   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, `error`).
+   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, `error`). If invalidating a past decision, specify `supersedes=[<id>]`.
    - If NO (e.g., routine refactor, styling tweak, or typo fix), do not pollute project memory.
 """
     # 1. Antigravity rule
@@ -136,6 +137,8 @@ def remember(
     scope: str = typer.Option("", "--scope", help="Comma-separated scope paths"),
     impact: str = typer.Option("medium", "--impact", "-i", help="Impact level: high, medium, low"),
     parents: str = typer.Option("", "--parents", "-p", help="Comma-separated parent memory IDs"),
+    supersedes: str = typer.Option("", "--supersedes", help="Comma-separated memory IDs superseded by this entry"),
+    relation_note: str = typer.Option("", "--relation-note", help="Reason for superseding/deriving"),
     author: str = typer.Option("user", "--author", "-a", help="Author tag"),
     project: Optional[str] = typer.Option(None, "--project", help="Target project name or directory path"),
 ):
@@ -145,6 +148,7 @@ def remember(
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     scope_list = [s.strip() for s in scope.split(",") if s.strip()]
     parent_list = [p.strip() for p in parents.split(",") if p.strip()]
+    supersede_list = [s.strip() for s in supersedes.split(",") if s.strip()]
 
     # Validate scope paths exist in target project root
     from ..core.memory_node import validate_scope_paths
@@ -164,10 +168,15 @@ def remember(
         author=author,
     )
 
-    success = storage.add_memory(node)
+    success = storage.add_memory(
+        node,
+        supersedes=supersede_list if supersede_list else None,
+        relation_reason=relation_note if relation_note else None,
+    )
     if success:
         proj_label = f" [cyan]({project})[/cyan]" if project else ""
-        console.print(f"[bold green]Recorded [{node.type.upper()}]:[/bold green]{proj_label} {node.summary}")
+        sup_label = f" [yellow](Supersedes: {', '.join(supersede_list)})[/yellow]" if supersede_list else ""
+        console.print(f"[bold green]Recorded [{node.type.upper()}]:[/bold green]{proj_label}{sup_label} {node.summary}")
         console.print(f"[dim]ID:[/dim] {node.id}")
         console.print(f"[dim]Content Hash:[/dim] {node.content_hash[:16]}...")
     else:
@@ -562,6 +571,97 @@ def clear(
 
     cleared = storage.clear_all_memories()
     console.print(f"[bold green]Cleared {cleared} memories from project storage.[/bold green]")
+
+
+@app.command(name="briefing")
+def briefing_cmd(
+    budget: int = typer.Option(2000, "--budget", "-b", help="Token budget cap for briefing"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Generate intelligent relevance-ranked project briefing for agent bootstrapping."""
+    from ..core.bootstrap import BootstrapEngine
+    storage = get_storage(project)
+    res = BootstrapEngine.generate_briefing(storage=storage, budget=budget)
+    console.print(res.get("formatted", ""))
+
+
+@app.command(name="context")
+def context_cmd(
+    budget: int = typer.Option(2000, "--budget", "-b", help="Token budget cap for briefing"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Alias for 'briefing' — generate relevance-ranked project briefing for agent bootstrapping."""
+    briefing_cmd(budget=budget, project=project)
+
+
+@app.command()
+def supersede(
+    target_id: str = typer.Argument(..., help="ID of the memory node to supersede"),
+    by: str = typer.Option(..., "--by", help="ID of the newer successor memory node"),
+    reason: str = typer.Option("", "--reason", "-r", help="Reason for superseding"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Explicitly mark a memory node as superseded by a newer memory."""
+    storage = get_storage(project)
+    success = storage.supersede_memory(target_id=target_id, by_id=by, reason=reason, actor="human")
+    if success:
+        console.print(f"[bold green]Successfully marked memory {target_id[:8]} as superseded by {by[:8]}.[/bold green]")
+    else:
+        console.print(f"[bold red]Failed to supersede memory {target_id}. Memory not found.[/bold red]")
+
+
+@app.command()
+def retract(
+    node_id: str = typer.Argument(..., help="ID of the memory node to retract"),
+    reason: str = typer.Option("", "--reason", "-r", help="Reason for retraction"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Mark an erroneously recorded memory as retracted."""
+    storage = get_storage(project)
+    success = storage.retract_memory(node_id=node_id, reason=reason, actor="human")
+    if success:
+        console.print(f"[bold green]Successfully retracted memory node {node_id[:8]}.[/bold green]")
+    else:
+        console.print(f"[bold red]Failed to retract memory {node_id}. Memory not found.[/bold red]")
+
+
+@app.command()
+def verify(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+):
+    """Verify cryptographic hash integrity and causal Merkle roots across all project memories."""
+    storage = get_storage(project)
+    all_nodes = storage.get_all(limit=50000)
+    if not all_nodes:
+        console.print("[yellow]No memories stored in this project to verify.[/yellow]")
+        return
+
+    corrupted = 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(f"Verifying {len(all_nodes)} memory nodes...", total=len(all_nodes))
+        for node in all_nodes:
+            if not node.verify():
+                corrupted += 1
+                console.print(f"[bold red]INTEGRITY MISMATCH:[/bold red] Node `{node.id}` fails content/Merkle verification.")
+            progress.advance(task)
+
+    if corrupted == 0:
+        console.print(Panel.fit(
+            f"[bold green]Verification Passed[/bold green]\n"
+            f"[dim]Total Verified:[/dim] {len(all_nodes)} nodes\n"
+            f"[dim]Cryptographic Proof:[/dim] All content hashes and causal roots match.",
+            border_style="green",
+        ))
+    else:
+        console.print(Panel.fit(
+            f"[bold red]Verification Failed[/bold red]\n"
+            f"[red]{corrupted} corrupted nodes detected![/red]",
+            border_style="red",
+        ))
 
 
 @app.command()

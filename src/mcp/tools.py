@@ -46,12 +46,21 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "parents": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Parent memory IDs that this memory causally derives from or supersedes.",
+                    "description": "Parent memory IDs that this memory causally derives from.",
+                },
+                "supersedes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Memory IDs that this new entry directly invalidates, supersedes, or replaces.",
                 },
                 "related": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Non-causal related memory IDs.",
+                },
+                "relation_note": {
+                    "type": "string",
+                    "description": "Optional explanation for why this memory supersedes or derives from its parents.",
                 },
                 "project": {
                     "type": "string",
@@ -137,15 +146,24 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_context",
-        "description": "Generate an institutional project memory summary (decisions, architecture, hacks, errors) to bootstrap context in a new agent session.",
+        "description": "Generate a relevance-ranked, token-budgeted project briefing (decisions, architecture, hacks, errors) based on DAG centrality, impact, and recency decay to bootstrap agent context.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "budget": {
+                    "type": "integer",
+                    "default": 2000,
+                    "description": "Token budget cap for the assembled briefing.",
+                },
+                "scope_hint": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional open file paths or active modules to bias ranking.",
+                },
                 "timeframe": {
                     "type": "string",
-                    "enum": ["session", "week", "month", "all"],
-                    "default": "week",
-                    "description": "Timeframe scope for contextual memory retrieval.",
+                    "default": "all",
+                    "description": "Optional timeframe parameter for backward compatibility.",
                 },
                 "project": {
                     "type": "string",

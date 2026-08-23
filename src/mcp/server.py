@@ -24,11 +24,16 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         scope: Optional[List[str]] = None,
         impact: str = "medium",
         parents: Optional[List[str]] = None,
+        supersedes: Optional[List[str]] = None,
         related: Optional[List[str]] = None,
         author: str = "ai-agent",
+        relation_note: Optional[str] = None,
         project: Optional[str] = None,
     ) -> str:
-        """Add a persistent memory entry (decision, command, hack, architecture, error, context) to target project."""
+        """Add a persistent memory entry (decision, command, hack, architecture, error, context) to target project.
+
+        If replacing an outdated decision or hack, pass `supersedes=['<previous-node-id>']`.
+        """
         res = handlers.handle_memory_add(
             content=content,
             type=type,
@@ -38,8 +43,10 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             scope=scope or [],
             impact=impact,
             parents=parents or [],
+            supersedes=supersedes or [],
             related=related or [],
             author=author,
+            relation_note=relation_note,
             project=project,
         )
         return res.get("message") or json.dumps(res, indent=2)
@@ -75,9 +82,19 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         return res.get("formatted") or json.dumps(res, indent=2)
 
     @mcp.tool()
-    def memory_context(timeframe: str = "week", project: Optional[str] = None) -> str:
-        """Aggregate institutional project memory context (decisions, architecture, hacks, errors) for agent bootstrapping."""
-        res = handlers.handle_memory_context(timeframe=timeframe, project=project)
+    def memory_context(
+        timeframe: str = "all",
+        budget: int = 2000,
+        scope_hint: Optional[List[str]] = None,
+        project: Optional[str] = None,
+    ) -> str:
+        """Generate a relevance-ranked, token-budgeted project briefing based on DAG centrality, impact, and recency decay."""
+        res = handlers.handle_memory_context(
+            timeframe=timeframe,
+            budget=budget,
+            scope_hint=scope_hint,
+            project=project,
+        )
         return res.get("formatted") or json.dumps(res, indent=2)
 
     @mcp.tool()
@@ -92,15 +109,17 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         return (
             "You are equipped with Tacit tools for maintaining persistent institutional memory.\n"
             "Follow these strict architectural protocols:\n\n"
-            "1. SESSION BOOTSTRAP: At the start of a session or when exploring a codebase area, call `memory_context` "
-            "to recall existing architectural patterns, critical commands, hacks, and solved errors.\n\n"
+            "1. SESSION BOOTSTRAP: At the start of a session or when exploring a codebase area, call `memory_context()` "
+            "to receive an intelligent relevance-ranked briefing of active architectural patterns, critical commands, hacks, and solved errors.\n\n"
             "2. TAXONOMY & CAUSAL LINEAGE: When calling `memory_add`, always provide:\n"
             "   - `tags`: At least 2 specific keywords (e.g. ['auth', 'jwt', 'security']).\n"
             "   - `scope`: Subsystem or directory path affected (e.g. ['/api/auth']).\n"
-            "   - `parents`: Link the UUID(s) of any past decisions from `memory_context` that this new entry modifies, extends, or is derived from.\n\n"
+            "   - `parents`: Link the UUID(s) of any past decisions from `memory_context` that this new entry modifies, extends, or is derived from.\n"
+            "   - `supersedes`: Link the UUID(s) of any previous decisions that this change directly invalidates or replaces.\n\n"
             "3. END-OF-TASK SELF-REFLECTION: At the conclusion of any non-trivial coding task, ask yourself:\n"
-            "   'Did I make a key architectural choice, establish a reusable command, implement a tricky bugfix, or apply a necessary workaround?'\n"
-            "   If YES, record it using `memory_add`. If NO (e.g., minor typo/formatting), do not add noise to memory.\n\n"
+            "   'Did I make a key architectural choice, establish a reusable command, implement a tricky bugfix, or apply/invalidate a workaround?'\n"
+            "   - If YES, record it using `memory_add`. If invalidating past guidance, include `supersedes=[<id>]`.\n"
+            "   - If NO (e.g., minor typo/formatting), do not add noise to memory.\n\n"
             "4. TARGETED SEARCH: Use `memory_search` to query past decisions before introducing new libraries, databases, or schemas."
         )
 
