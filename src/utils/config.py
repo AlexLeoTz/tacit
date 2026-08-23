@@ -1,4 +1,4 @@
-"""Configuration and Multi-Project Management for Project Memory Cortex."""
+"""Configuration and Multi-Project Management for Tacit."""
 
 import json
 import os
@@ -10,7 +10,7 @@ load_dotenv()
 
 
 class Config:
-    """Centralized configuration and multi-project resolver for Tacit (formerly Memory Cortex)."""
+    """Centralized configuration and multi-project resolver for Tacit."""
 
     DEFAULT_MEMORY_DIR_NAME = ".tacit"
     DEFAULT_EXPORT_DIR_NAME = "memory-export"
@@ -20,7 +20,7 @@ class Config:
     PREVIEW_WS_PORT: int = int(os.getenv("PREVIEW_WS_PORT", "4001"))
     MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio")
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "50"))
-    DUAL_WRITE: bool = os.getenv("TACIT_DUAL_WRITE", os.getenv("PMC_DUAL_WRITE", "true")).lower() in ("true", "1", "yes")
+    DUAL_WRITE: bool = os.getenv("TACIT_DUAL_WRITE", "true").lower() in ("true", "1", "yes")
 
     MEMORY_TYPES = [
         "decision",

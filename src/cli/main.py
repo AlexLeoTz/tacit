@@ -1,6 +1,9 @@
-"""Command-Line Interface (CLI) for Project Memory Cortex with Multi-Project Support."""
+"""Command-Line Interface (CLI) for Tacit with Multi-Project Support."""
 
 import json
+import os
+import platform
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -591,21 +594,22 @@ def install_mcp(
         ))
         return
 
+    sys_os = platform.system().lower()
     if client.lower() in ("antigravity", "agy", "gemini"):
         config_path = Path.home() / ".gemini" / "config" / "mcp_config.json"
     elif client.lower() == "claude":
-        if sys.platform == "win32":
+        if sys_os == "windows":
             config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-        elif sys.platform == "darwin":
+        elif sys_os == "darwin":
             config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
         else:
             config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
     elif client.lower() in ("claude-code", "claude_code"):
         config_path = Path.home() / ".claude.json"
     elif client.lower() == "cursor":
-        if sys.platform == "win32":
+        if sys_os == "windows":
             config_path = Path(os.environ.get("APPDATA", "")) / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
-        elif sys.platform == "darwin":
+        elif sys_os == "darwin":
             config_path = Path.home() / "Library" / "Application Support" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
         else:
             config_path = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"

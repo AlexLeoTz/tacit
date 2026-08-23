@@ -7,7 +7,7 @@ from rich.logging import RichHandler
 console = Console()
 
 
-def get_logger(name: str = "project_memory") -> logging.Logger:
+def get_logger(name: str = "tacit") -> logging.Logger:
     """Get a configured logger with rich formatting."""
     logger = logging.getLogger(name)
     if not logger.handlers:

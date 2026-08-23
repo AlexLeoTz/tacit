@@ -154,7 +154,7 @@ Equipped with this structural and historical background, the agent immediately c
          │                        │                        │
          ▼                        ▼                        ▼
  ┌──────────────────────────────────────────────────────────────────┐
- │              Local Project Directory (.project-memory/)          │
+ │              Local Project Directory (.tacit/)                   │
  │              - memory.db (Encrypted / WAL SQLite)                │
  │              - Merkle Hash Tree & Causal Ancestry DAG            │
  └──────────────────────────────────────────────────────────────────┘
@@ -292,9 +292,9 @@ Add this entry to your local Codex developer configuration layer:
 **You do not need to manually create rule files.**
 
 When you run `tacit init` in any project, it **automatically generates** the rule files for you:
-* **Antigravity / AGY CLI**: `.agents/rules/project_memory.md`
+* **Antigravity / AGY CLI**: `.agents/rules/tacit.md`
 * **Cursor**: `.cursorrules`
-* **MCP Prompts**: Exposed directly over the MCP protocol as `project-memory-instructions`.
+* **MCP Prompts**: Exposed directly over the MCP protocol as `tacit-instructions`.
 
 If you ever need to inspect or customize the rules, here is the generated template:
 

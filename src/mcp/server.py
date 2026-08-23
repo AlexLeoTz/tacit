@@ -104,11 +104,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             "4. TARGETED SEARCH: Use `memory_search` to query past decisions before introducing new libraries, databases, or schemas."
         )
 
-    @mcp.prompt("project-memory-instructions")
-    def project_memory_instructions() -> str:
-        """System instructions for AI agents on how to use Project Memory Cortex."""
-        return tacit_instructions()
-
     return mcp
 
 
