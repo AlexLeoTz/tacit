@@ -1,4 +1,4 @@
-"""Live preview HTTP and WebSocket server for Project Memory Cortex with Multi-Project Support."""
+"""Live preview HTTP and WebSocket server for Tacit with Multi-Project Support."""
 
 import asyncio
 import http.server
@@ -468,21 +468,21 @@ class MarkdownPreviewServer:
         try:
             from rich.console import Console
             console = Console()
-            logo_art = r"""[bold green]
-    ____  __  ________
-   / __ \/  |/  / ____|
-  / /_/ / /|_/ / /     
- / ____/ /  / / /___   
-/_/   /_/  /_/\____/   
+            logo_art = r"""[bold cyan]
+  _______   _    _____ _____ _______ 
+ |__   __| / \  / ____|_   _|__   __|
+    | |   / _ \| |      | |    | |   
+    | |  / ___ \ |___  _| |_   | |   
+    |_| /_/   \_\____|_____|   |_|   
 
-  [bold white]Project Memory Cortex[/bold white]
+  [bold white]Tacit[/bold white]
   [dim]Persistent, immutable, timestamped institutional memory[/dim]
-[/bold green]"""
+[/bold cyan]"""
             console.print(logo_art)
         except Exception:
             pass
 
-        print(f"Project Memory Live Preview running at: http://localhost:{self.port}")
+        print(f"Tacit Live Preview running at: http://localhost:{self.port}")
         print(f"WebSocket live-reload active on port: {self.ws_port}")
 
         if block:

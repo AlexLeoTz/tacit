@@ -1,4 +1,4 @@
-"""Logging configuration for Project Memory Cortex."""
+"""Logging configuration for Tacit."""
 
 import logging
 from rich.console import Console

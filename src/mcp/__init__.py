@@ -1,4 +1,4 @@
-"""MCP Integration layer for Project Memory Cortex."""
+"""MCP Integration layer for Tacit."""
 
 from .handlers import MemoryMCPHandlers
 from .tools import TOOL_DEFINITIONS

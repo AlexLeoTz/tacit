@@ -1,4 +1,4 @@
-"""Search and indexing utilities for Project Memory Cortex."""
+"""Search and indexing utilities for Tacit."""
 
 from .full_text import FullTextSearch
 from .temporal import TemporalSearch

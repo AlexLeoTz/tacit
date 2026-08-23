@@ -27,7 +27,7 @@ MEMORY_MARKDOWN_TEMPLATE = """# {title}
 *Merkle Root*: `{merkle_root}`
 """
 
-INDEX_MARKDOWN_TEMPLATE = """# Project Memory Cortex Index
+INDEX_MARKDOWN_TEMPLATE = """# Tacit Index
 
 Generated on: {generated_at}  
 Total Memories: **{total_count}**
@@ -39,7 +39,7 @@ Total Memories: **{total_count}**
 {recent_table}
 
 ---
-*Powered by Project Memory Cortex*
+*Powered by Tacit*
 """
 
 HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
@@ -47,7 +47,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Memory Cortex Preview</title>
+    <title>Tacit Preview</title>
     <style>
         /* Base / Dark Theme (Default) */
         :root {
@@ -588,7 +588,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                         <polyline points="2 17 12 22 22 17" />
                         <polyline points="2 12 12 17 22 12" />
                     </svg>
-                    <span>Memory Cortex</span>
+                    <span>Tacit</span>
                 </div>
                 <div class="theme-switcher">
                     <button class="theme-btn" data-theme="light" title="Light Theme" onclick="setTheme('light')">Light</button>
@@ -639,7 +639,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         <div class="content" id="content">
             <div class="markdown-body" id="rendered-content">
                 <h1>Select a memory to view details</h1>
-                <p>Live preview connected to Project Memory Cortex local server.</p>
+                <p>Live preview connected to Tacit local server.</p>
             </div>
         </div>
     </div>
@@ -686,7 +686,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             </div>
             <div class="modal-body">
                 <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-                    PMC stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
+                    Tacit stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
                 </p>
                 <form id="add-memory-form" onsubmit="submitNewMemory(event)">
                     <div style="display: flex; gap: 10px; margin-bottom: 10px;">
@@ -758,46 +758,46 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
     <div class="modal-overlay" id="cli-modal">
         <div class="modal-card" style="max-width: 600px; width: 90%;">
             <div class="modal-title">
-                <span>PMC CLI Quick Reference</span>
+                <span>Tacit CLI Quick Reference</span>
             </div>
             <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
                 <p style="font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-                    Use the global <code>pmc</code> binary in any project terminal to record or query decision graphs.
+                    Use the global <code>tacit</code> (or legacy <code>pmc</code>) binary in any project terminal to record or query decision graphs.
                 </p>
                 <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px;">
                     <div>
-                        <strong style="color: var(--accent);">1. Initialize Cortex Database</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc init</pre>
+                        <strong style="color: var(--accent);">1. Initialize Tacit Database</strong>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit init</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">2. Record Tacit Knowledge (With Parent Linkage)</strong>
                         <p style="font-size: 11px; color: var(--fg-muted); margin-top: 2px;">
                             Always link causal parents to create the ancestry graph:
                         </p>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px; overflow-x: auto;">pmc remember "Resolved db connection exhaustion by raising pool to 30" \
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px; overflow-x: auto;">tacit remember "Resolved db connection exhaustion by raising pool to 30" \
   --type decision \
   --tags "db,performance" \
   --parents 54bd72c1,a6a9dc1e</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">3. Visualize Causal DAG Tree</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc tree</pre>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit tree</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">4. Trace Local Lineage (Ancestors & Descendants)</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc lineage &lt;node_id_or_prefix&gt;</pre>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit lineage &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">5. View Full Memory Details</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc get &lt;node_id_or_prefix&gt;</pre>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit get &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">6. Delete a Specific Memory Node</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc delete &lt;node_id_or_prefix&gt;</pre>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit delete &lt;node_id_or_prefix&gt;</pre>
                     </div>
                     <div>
                         <strong style="color: var(--accent);">7. Global Update & Rule Refresh</strong>
-                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">pmc update</pre>
+                        <pre style="background: var(--pre-bg); padding: 6px; border-radius: 4px; font-size: 11px; margin-top: 4px;">tacit update</pre>
                     </div>
                 </div>
             </div>
@@ -815,13 +815,13 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         let memories = [];
         let projects = [];
         let currentProjectName = "";
-        let selectedProject = localStorage.getItem('pmc_selected_project') || "current";
+        let selectedProject = localStorage.getItem('tacit_selected_project') || localStorage.getItem('pmc_selected_project') || "current";
         let currentMemoryId = null;
         let currentFilter = "all";
 
         // Theme management (light, dark, system)
         function initTheme() {
-            const savedTheme = localStorage.getItem('pmc_theme') || 'system';
+            const savedTheme = localStorage.getItem('tacit_theme') || localStorage.getItem('pmc_theme') || 'system';
             setTheme(savedTheme, false);
         }
 
@@ -831,7 +831,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 btn.classList.toggle('active', btn.getAttribute('data-theme') === theme);
             });
             if (save) {
-                localStorage.setItem('pmc_theme', theme);
+                localStorage.setItem('tacit_theme', theme);
             }
         }
 
@@ -856,7 +856,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
         function onProjectChange(newProject) {
             selectedProject = newProject;
-            localStorage.setItem('pmc_selected_project', selectedProject);
+            localStorage.setItem('tacit_selected_project', selectedProject);
             currentMemoryId = null;
 
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -959,7 +959,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 
             contentEl.innerHTML = `
                 <h1>No memories found in selected workspace</h1>
-                <p>Use your AI assistant (Antigravity, Cursor, Claude) or run <code>pmc remember "..."</code> to record institutional memories.</p>
+                <p>Use your AI assistant (Antigravity, Cursor, Claude) or run <code>tacit remember "..."</code> to record institutional memories.</p>
                 ${extraHelp}
             `;
         }

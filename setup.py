@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="project-memory-cortex",
+    name="tacit",
     version="0.1.0",
-    description="Persistent, immutable project memory cortex for AI coding agents",
-    author="Project Memory Cortex Contributors",
+    description="Persistent, immutable project memory and tacit knowledge layer for AI coding agents",
+    author="Tacit Contributors",
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
@@ -19,6 +19,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
+            "tacit=src.cli.main:app",
             "pmc=src.cli.main:app",
             "project-memory=src.cli.main:app",
         ],

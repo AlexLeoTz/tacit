@@ -1,4 +1,4 @@
-"""Full-text search query handling and ranking for Project Memory Cortex."""
+"""Full-text search query handling and ranking for Tacit."""
 
 from typing import List, Optional
 from ..core.memory_node import MemoryNode

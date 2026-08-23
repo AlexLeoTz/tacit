@@ -1,4 +1,4 @@
-"""Core models, DAG lineage, and storage engine for Project Memory Cortex."""
+"""Core models, DAG lineage, and storage engine for Tacit."""
 
 from .memory_node import MemoryNode
 from .memory_dag import MemoryDAG

@@ -1,4 +1,4 @@
-"""MCP Server implementation for Project Memory Cortex using FastMCP with Multi-Project Support."""
+"""MCP Server implementation for Tacit using FastMCP with Multi-Project Support."""
 
 import json
 from typing import Any, Dict, List, Optional
@@ -11,7 +11,7 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
     """Factory creating a configured FastMCP server instance supporting multiple projects."""
     from mcp.server.fastmcp import FastMCP
 
-    mcp = FastMCP("project-memory-cortex")
+    mcp = FastMCP("tacit")
     handlers = MemoryMCPHandlers(storage)
 
     @mcp.tool()
@@ -86,11 +86,11 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         res = handlers.handle_memory_projects()
         return res.get("formatted") or json.dumps(res, indent=2)
 
-    @mcp.prompt("project-memory-instructions")
-    def project_memory_instructions() -> str:
-        """System instructions for AI agents on how to use Project Memory Cortex."""
+    @mcp.prompt("tacit-instructions")
+    def tacit_instructions() -> str:
+        """System instructions for AI agents on how to use Tacit."""
         return (
-            "You are equipped with Project Memory Cortex (PMC) tools for maintaining persistent institutional memory.\n"
+            "You are equipped with Tacit tools for maintaining persistent institutional memory.\n"
             "Follow these strict architectural protocols:\n\n"
             "1. SESSION BOOTSTRAP: At the start of a session or when exploring a codebase area, call `memory_context` "
             "to recall existing architectural patterns, critical commands, hacks, and solved errors.\n\n"
@@ -103,6 +103,11 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             "   If YES, record it using `memory_add`. If NO (e.g., minor typo/formatting), do not add noise to memory.\n\n"
             "4. TARGETED SEARCH: Use `memory_search` to query past decisions before introducing new libraries, databases, or schemas."
         )
+
+    @mcp.prompt("project-memory-instructions")
+    def project_memory_instructions() -> str:
+        """System instructions for AI agents on how to use Project Memory Cortex."""
+        return tacit_instructions()
 
     return mcp
 

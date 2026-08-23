@@ -10,17 +10,17 @@ load_dotenv()
 
 
 class Config:
-    """Centralized configuration and multi-project resolver for Memory Cortex."""
+    """Centralized configuration and multi-project resolver for Tacit (formerly Memory Cortex)."""
 
-    DEFAULT_MEMORY_DIR_NAME = ".project-memory"
+    DEFAULT_MEMORY_DIR_NAME = ".tacit"
     DEFAULT_EXPORT_DIR_NAME = "memory-export"
-    REGISTRY_FILE: Path = Path.home() / ".gemini" / "config" / "pmc_projects.json"
+    REGISTRY_FILE: Path = Path.home() / ".gemini" / "config" / "tacit_projects.json"
 
     PREVIEW_PORT: int = int(os.getenv("PREVIEW_PORT", "4000"))
     PREVIEW_WS_PORT: int = int(os.getenv("PREVIEW_WS_PORT", "4001"))
     MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "stdio")
     SEARCH_LIMIT: int = int(os.getenv("SEARCH_LIMIT", "50"))
-    DUAL_WRITE: bool = os.getenv("PMC_DUAL_WRITE", "true").lower() in ("true", "1", "yes")
+    DUAL_WRITE: bool = os.getenv("TACIT_DUAL_WRITE", os.getenv("PMC_DUAL_WRITE", "true")).lower() in ("true", "1", "yes")
 
     MEMORY_TYPES = [
         "decision",
@@ -57,11 +57,17 @@ class Config:
 
     @classmethod
     def get_memory_dir(cls, project_root: Optional[str | Path] = None) -> Path:
-        """Get the .project-memory directory for a specific project."""
+        """Get the memory directory (.tacit or legacy .project-memory) for a specific project."""
         root = cls.find_project_root(project_root)
         env_dir = os.getenv("MEMORY_DIR")
         if env_dir and not project_root:
             return Path(env_dir).resolve()
+        
+        # Check if legacy .project-memory exists first, to ensure backwards compatibility
+        legacy_dir = root / ".project-memory"
+        if legacy_dir.exists() and not (root / cls.DEFAULT_MEMORY_DIR_NAME).exists():
+            return legacy_dir
+            
         return root / cls.DEFAULT_MEMORY_DIR_NAME
 
     @classmethod
@@ -95,16 +101,32 @@ class Config:
         return root
 
     @classmethod
+    def _load_projects_registry(cls) -> Dict[str, str]:
+        """Loads projects with fallback to legacy pmc_projects.json"""
+        if cls.REGISTRY_FILE.exists():
+            try:
+                return json.loads(cls.REGISTRY_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        
+        legacy_file = cls.REGISTRY_FILE.parent / "pmc_projects.json"
+        if legacy_file.exists():
+            try:
+                data = json.loads(legacy_file.read_text(encoding="utf-8"))
+                # Migrate to the new registry file
+                cls.REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                cls.REGISTRY_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                return data
+            except Exception:
+                pass
+        return {}
+
+    @classmethod
     def register_project(cls, project_path: Path) -> None:
         """Register a project root in the global registry for easy multi-project tracking."""
         try:
             cls.REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            projects: Dict[str, str] = {}
-            if cls.REGISTRY_FILE.exists():
-                try:
-                    projects = json.loads(cls.REGISTRY_FILE.read_text(encoding="utf-8"))
-                except Exception:
-                    projects = {}
+            projects = cls._load_projects_registry()
 
             proj_str = str(project_path.resolve())
             projects[project_path.name] = proj_str
@@ -115,10 +137,8 @@ class Config:
     @classmethod
     def list_registered_projects(cls) -> Dict[str, str]:
         """Return all registered projects {name: path}."""
-        if not cls.REGISTRY_FILE.exists():
-            return {}
         try:
-            return json.loads(cls.REGISTRY_FILE.read_text(encoding="utf-8"))
+            return cls._load_projects_registry()
         except Exception:
             return {}
 
@@ -142,7 +162,15 @@ class Config:
         import urllib.request
         from .. import __version__
 
-        cache_path = cls.REGISTRY_FILE.parent / "pmc_update_cache.json"
+        cache_path = cls.REGISTRY_FILE.parent / "tacit_update_cache.json"
+        if not cache_path.exists():
+            legacy_cache = cls.REGISTRY_FILE.parent / "pmc_update_cache.json"
+            if legacy_cache.exists():
+                try:
+                    legacy_cache.rename(cache_path)
+                except Exception:
+                    pass
+
         now = time.time()
 
         if cache_path.exists():
@@ -160,7 +188,7 @@ class Config:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             req = urllib.request.Request(
                 "https://api.github.com/repos/AlexLeoTz/project-memory-cortext/releases/latest",
-                headers={"User-Agent": "PMC-Update-Checker", "Accept": "application/vnd.github.v3+json"},
+                headers={"User-Agent": "Tacit-Update-Checker", "Accept": "application/vnd.github.v3+json"},
             )
             with urllib.request.urlopen(req, timeout=1.5) as response:
                 if response.status == 200:

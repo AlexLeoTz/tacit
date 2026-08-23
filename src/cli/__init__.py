@@ -1,3 +1,3 @@
-"""CLI package for Project Memory Cortex."""
+"""CLI package for Tacit."""
 
 __all__ = []

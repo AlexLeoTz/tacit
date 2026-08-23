@@ -1,4 +1,4 @@
-"""Utility modules for Project Memory Cortex."""
+"""Utility modules for Tacit."""
 
 from .config import Config
 from .hashing import calculate_sha256, calculate_content_hash, calculate_merkle_root

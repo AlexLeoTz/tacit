@@ -1,4 +1,4 @@
-"""Cryptographic hash utilities for Project Memory Cortex."""
+"""Cryptographic hash utilities for Tacit."""
 
 import hashlib
 import json

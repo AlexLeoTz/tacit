@@ -1,4 +1,4 @@
-"""Tool definitions and JSON Schema specifications for Project Memory Cortex MCP server with Multi-Project support."""
+"""Tool definitions and JSON Schema specifications for Tacit MCP server with Multi-Project support."""
 
 from typing import Any, Dict, List
 

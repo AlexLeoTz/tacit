@@ -20,8 +20,8 @@ from ..mcp.server import MemoryMCPServer
 from ..utils.config import Config
 
 app = typer.Typer(
-    name="pmc",
-    help="Project Memory Cortex - Persistent institutional memory for AI coding agents.",
+    name="tacit",
+    help="Tacit - Persistent, immutable institutional memory and tacit knowledge layer for AI coding agents.",
     add_completion=False,
 )
 console = Console()
@@ -30,7 +30,7 @@ console = Console()
 @app.callback()
 def main_callback(ctx: typer.Context):
     """Global callback executed before any CLI command."""
-    # Don't show update banner if developer is already running `pmc update` or `pmc mcp`
+    # Don't show update banner if developer is already running `tacit update` or `tacit mcp`
     if ctx.invoked_subcommand not in ("update", "mcp"):
         try:
             update_info = Config.check_for_updates()
@@ -38,7 +38,7 @@ def main_callback(ctx: typer.Context):
                 console.print(
                     Panel.fit(
                         f"[yellow]Update available:[/yellow] [dim]v{update_info['current']}[/dim] -> [bold green]v{update_info['latest']}[/bold green]\n"
-                        f"Run [bold cyan]pmc update[/bold cyan] to upgrade globally.",
+                        f"Run [bold cyan]tacit update[/bold cyan] to upgrade globally.",
                         border_style="yellow",
                         padding=(0, 2),
                     )
@@ -78,9 +78,9 @@ def init(
     count = storage.get_count()
 
     # Automatically generate agent rules for Antigravity, Cursor, and Claude
-    rule_content = """# Autonomous Institutional Memory Rules (PMC)
+    rule_content = """# Autonomous Institutional Memory Rules (Tacit)
 
-You are connected to Project Memory Cortex to preserve engineering decisions across chat resets.
+You are connected to Tacit to preserve engineering decisions across chat resets.
 
 ## Critical Concept (What to Store vs What NOT to Store):
 * **ONLY Store Distilled Tacit Knowledge**: Record non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
@@ -102,7 +102,7 @@ You are connected to Project Memory Cortex to preserve engineering decisions acr
     agy_rule = target_root / ".agents" / "rules" / "project_memory.md"
     agy_rule.parent.mkdir(parents=True, exist_ok=True)
     if force or not agy_rule.exists():
-        agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Project Memory Cortex\n---\n\n{rule_content}", encoding="utf-8")
+        agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Tacit\n---\n\n{rule_content}", encoding="utf-8")
 
     # 2. Cursor rules
     cursor_rule = target_root / ".cursorrules"
@@ -111,7 +111,7 @@ You are connected to Project Memory Cortex to preserve engineering decisions acr
 
     console.print(
         Panel.fit(
-            f"[bold green]Project Memory Cortex Initialized[/bold green]\n"
+            f"[bold green]Tacit Initialized[/bold green]\n"
             f"[dim]Project Root:[/dim] {target_root.resolve()}\n"
             f"[dim]Storage Dir:[/dim]  {Config.get_memory_dir(target_root).resolve()}\n"
             f"[dim]Database:[/dim]     {db_path.resolve()}\n"
@@ -465,7 +465,7 @@ def projects():
     current_root = Config.find_project_root()
     registered[current_root.name] = str(current_root.resolve())
 
-    table = Table(title="Registered Projects (Project Memory Cortex)", show_header=True, header_style="bold green")
+    table = Table(title="Registered Projects (Tacit)", show_header=True, header_style="bold green")
     table.add_column("Project", style="cyan", width=24)
     table.add_column("Path", style="dim")
     table.add_column("Memories", style="magenta", justify="right", width=10)
@@ -575,13 +575,13 @@ def install_mcp(
     import sys
 
     config_entry = {
-        "command": "pmc",
+        "command": "tacit",
         "args": ["mcp"]
     }
 
     if client.lower() == "print":
         console.print(Panel(
-            json.dumps({"mcpServers": {"project-memory": config_entry}}, indent=2),
+            json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2),
             title="MCP Configuration Snippet",
             border_style="cyan"
         ))
@@ -621,31 +621,31 @@ def install_mcp(
         if "mcpServers" not in existing_data:
             existing_data["mcpServers"] = {}
 
-        existing_data["mcpServers"]["project-memory"] = config_entry
+        existing_data["mcpServers"]["tacit"] = config_entry
         config_path.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
 
         console.print(Panel.fit(
             f"[bold green]MCP Server Configured Successfully[/bold green]\n"
             f"[dim]Client:[/dim]  {client.capitalize()}\n"
             f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
-            f"[cyan]The 'pmc mcp' server is now globally registered for all projects.[/cyan]",
+            f"[cyan]The 'tacit mcp' server is now globally registered for all projects.[/cyan]",
             border_style="green",
         ))
     except Exception as e:
         console.print(f"[red]Failed to write config automatically: {e}[/red]")
         console.print("[yellow]You can manually add this to your MCP configuration:[/yellow]")
-        console.print(json.dumps({"mcpServers": {"project-memory": config_entry}}, indent=2))
+        console.print(json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2))
 
 
 @app.command()
 def update(
     git_url: str = typer.Option("https://github.com/AlexLeoTz/project-memory-cortext.git", "--url", help="Git repository URL to update from"),
 ):
-    """Update PMC globally to the latest version from GitHub and refresh project rules in the current directory."""
+    """Update Tacit globally to the latest version from GitHub and refresh project rules in the current directory."""
     import subprocess
     import sys
 
-    console.print("[cyan]Updating Project Memory Cortex (PMC) globally...[/cyan]")
+    console.print("[cyan]Updating Tacit globally...[/cyan]")
     pip_target = f"git+{git_url}"
 
     current_root = Config.find_project_root()
@@ -683,20 +683,23 @@ def update(
             subprocess.run([sys.executable, "-m", "src.cli.main", "init", "--force"], check=False)
         except Exception:
             try:
-                subprocess.run(["pmc", "init", "--force"], check=False)
+                subprocess.run(["tacit", "init", "--force"], check=False)
             except Exception:
-                pass
+                try:
+                    subprocess.run(["pmc", "init", "--force"], check=False)
+                except Exception:
+                    pass
 
         console.print(Panel.fit(
-            f"[bold green]Project Memory Cortex Successfully Updated![/bold green]\n"
+            f"[bold green]Tacit Successfully Updated![/bold green]\n"
             f"[dim]Version Source:[/dim] {git_url}\n"
             f"[dim]Active Project:[/dim] {current_root.resolve()}\n\n"
-            f"[cyan]Global 'pmc' CLI and local workspace rules are up to date.[/cyan]",
+            f"[cyan]Global 'tacit' CLI and local workspace rules are up to date.[/cyan]",
             border_style="green",
         ))
 
     except Exception as e:
-        console.print(f"[bold red]Failed to update PMC: {e}[/bold red]")
+        console.print(f"[bold red]Failed to update Tacit: {e}[/bold red]")
 
 
 if __name__ == "__main__":

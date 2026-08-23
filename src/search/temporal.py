@@ -1,4 +1,4 @@
-"""Temporal and time-sliced query utilities for Project Memory Cortex."""
+"""Temporal and time-sliced query utilities for Tacit."""
 
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional

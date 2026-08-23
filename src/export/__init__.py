@@ -1,4 +1,4 @@
-"""Export and Live Preview modules for Project Memory Cortex."""
+"""Export and Live Preview modules for Tacit."""
 
 from .templates import MEMORY_MARKDOWN_TEMPLATE, INDEX_MARKDOWN_TEMPLATE, HTML_PREVIEW_TEMPLATE
 from .markdown_exporter import MarkdownExporter, ExportSummary

@@ -13,7 +13,7 @@ from ..utils.config import Config
 
 
 class MemoryMCPHandlers:
-    """Core handler logic for Memory Cortex MCP tools supporting multiple projects."""
+    """Core handler logic for Tacit MCP tools supporting multiple projects."""
 
     def __init__(self, default_storage: Optional[MemoryStorage] = None):
         self._storage_cache: Dict[str, MemoryStorage] = {}

@@ -1,4 +1,4 @@
-"""SQLite-based storage layer with full-text search index for Project Memory Cortex."""
+"""SQLite-based storage layer with full-text search index for Tacit."""
 
 import sqlite3
 from pathlib import Path
