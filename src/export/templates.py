@@ -546,7 +546,22 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         }
 
         function getBadgeClass(type) {
-            return `badge-${type.toLowerCase()}`;
+            const t = (type || 'decision').toLowerCase();
+            switch (t) {
+                case 'architecture':
+                    return 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800/80';
+                case 'decision':
+                    return 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-300 dark:border-blue-800/80';
+                case 'hack':
+                    return 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800/80';
+                case 'command':
+                    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/80';
+                case 'error':
+                    return 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800/80';
+                case 'context':
+                default:
+                    return 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700';
+            }
         }
 
         function renderEmptyState() {
@@ -592,7 +607,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                         otherProjsWithMem.map(p => `<button class="empty-proj-btn" onclick="switchProjectDirectly('${p.name}')">${p.name} (${p.count})</button>`).join('') +
                         `</div>`;
                 }
-                listEl.innerHTML = `<div class="empty-box">No matching memories found.${switchHint}</div>`;
+                listEl.innerHTML = `<div class="p-4 text-center text-xs text-zinc-400 dark:text-zinc-500 border border-dashed border-zinc-300 dark:border-zinc-800 rounded-lg">No matching memories found.${switchHint}</div>`;
                 return;
             }
 
@@ -600,18 +615,26 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 const dateStr = new Date(m.timestamp * 1000).toLocaleDateString(undefined, {
                     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                 });
-                const projLabel = (selectedProject === 'all' && m.project) ? `<span class="proj-badge">${m.project}</span>` : '';
+                const typeLabel = (m.type || 'decision').toUpperCase();
+                const badgeStyle = getBadgeClass(m.type);
+                const isActive = (currentMemoryId === m.id);
+                const projLabel = (selectedProject === 'all' && m.project) ? `<span class="px-1.5 py-0.5 rounded text-[10px] bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-medium">${m.project}</span>` : '';
+                
+                const cardClasses = isActive 
+                    ? 'border-cyan-500 ring-2 ring-cyan-500/40 bg-cyan-50/70 dark:bg-cyan-950/30 shadow-md' 
+                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/90 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-sm';
+
                 return `
-                    <div class="memory-item ${currentMemoryId === m.id ? 'active' : ''}" onclick="loadMemory('${m.id}')">
-                        <div class="item-header">
-                            <div>
-                                <span class="type-badge ${getBadgeClass(m.type)}">${m.type}</span>
+                    <div class="cursor-pointer p-3 rounded-lg border transition-all flex flex-col gap-1.5 ${cardClasses}" onclick="loadMemory('${m.id}')">
+                        <div class="flex items-center justify-between gap-1">
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold border tracking-wider uppercase ${badgeStyle}">${typeLabel}</span>
                                 ${projLabel}
                             </div>
-                            <span class="item-date">${dateStr}</span>
+                            <span class="text-[10px] text-zinc-400 dark:text-zinc-500 shrink-0 font-medium">${dateStr}</span>
                         </div>
-                        <div class="item-title">${m.title || m.summary}</div>
-                        <div class="item-summary">${m.summary}</div>
+                        <div class="text-xs font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-1 leading-snug">${m.title || m.summary}</div>
+                        <div class="text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-2 leading-relaxed">${m.summary || ''}</div>
                     </div>
                 `;
             }).join('');
