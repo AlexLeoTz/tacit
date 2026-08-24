@@ -3,8 +3,8 @@
   <h1>Tacit</h1>
   <p><strong>The Institutional Memory Layer and Decision Lineage Engine for AI Coding Agents</strong></p>
   <p>
-    <a href="#the-problem-the-groundhog-day-of-ai-coding">The Problem</a> •
-    <a href="#enter-tacit-the-2-minute-morning-briefing">Why Tacit?</a> •
+    <a href="#the-problem-loss-of-context-across-new-chats">The Problem</a> •
+    <a href="#how-tacit-works">How Tacit Works</a> •
     <a href="#1-quick-start-and-installation">Quick Start</a> •
     <a href="#2-ai-agent-integration-mcp-setup">MCP Setup</a> •
     <a href="#3-agent-rules-automated">Master Rules</a> •
@@ -16,42 +16,25 @@
 
 ---
 
-## The Problem: The Groundhog Day of AI Coding
+## The Problem: Loss of Context Across New Chats
 
-Every time you open a fresh chat in **Claude Code, Cursor, Antigravity, or OpenCode**, you are onboarding a capable engineer who has **total amnesia**.
+Every time you start a new chat in **Claude Code, Cursor, Antigravity, or OpenCode**, the AI model starts with a clean slate and no memory of previous sessions.
 
-They know how to write clean Python, Rust, or TypeScript. But they know nothing about your project's unwritten institutional history:
+The model knows how to write clean code, but it lacks the unwritten context of your project:
 
-* They do not know the **build workaround ("hack")** you spent 4 hours debugging last Tuesday (`numpy<2.0.0` pinned due to a legacy C-API extension in an audio worker).
-* They do not know the **exact deployment command** or specific GPU volume mounts needed to start local inference containers.
-* They do not know that you **deliberately moved back to session cookies** because rotating JWT refresh tokens leaked across distributed background workers.
+* It does not know the undocumented workarounds ("hacks") you added to fix environment or library quirks.
+* It does not know the specific operational and deployment commands needed to run your services.
+* It does not know past architecture decisions or why an earlier approach was changed.
 
-Every time you reset a chat or compress your context window, you have to re-type the same commands, re-explain your services, and re-warn the agent about the same architectural traps.
+Every time you reset a chat or your conversation exceeds the context window, you have to re-type setup commands, re-explain your services, and re-warn the agent about the same constraints.
 
-If you forget to explain a workaround, the AI model looks at your code, assumes it looks redundant, and refactors it away. That silently re-introduces the exact production bug you fixed last week.
-
----
-
-### Why Flat Memory Tools Fail (The "Notebook That Lies")
-
-Most agent-memory and vector-search tools try to fix this by storing flat snippets of raw chats or unranked text. As a codebase evolves over months, that creates a notebook full of contradictions:
-
-* **Page 12:** *"We authenticate users with passwords."*
-* **Page 40:** *"Switched to fingerprint authentication."*
-* **Page 88:** *"Fingerprint scanners kept failing in production: switched back to passwords."*
-
-When a fresh AI session searches a flat memory store, all three statements sound equally true. It feeds outdated, contradictory advice straight into the prompt and misleads the agent from turn 1.
+If you forget to explain a workaround, the AI model may assume the code looks redundant and refactor it away, which can re-introduce bugs you previously resolved.
 
 ---
 
-## Enter Tacit: The 2-Minute Morning Briefing
+## How Tacit Works
 
-What a new engineer actually needs on day 1 is not a 10,000-line chat dump. They need a **crisp 2-minute morning briefing**:
-1. **The 3 to 5 foundational architectural decisions** that define how the system is built today (and *why* those choices were made).
-2. **The active undocumented workarounds ("hacks")** currently preventing outages in production so they do not delete them.
-3. **The operational commands and resolved error caveats** to avoid known landmines.
-
-**Tacit provides this institutional memory layer locally, automatically, and permanently.**
+Tacit provides a local institutional memory layer for AI coding tools. At the start of a task, the agent receives a concise project briefing with active decisions, workarounds, and commands.
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
@@ -83,13 +66,13 @@ What a new engineer actually needs on day 1 is not a 10,000-line chat dump. They
 
 ---
 
-### How Tacit Works
+### Core Mechanics
 
 #### 1. Instant Session Bootstrapping (`memory_context()`)
 At the start of every session, your AI agent calls `memory_context()` to load an intelligent, token-budgeted project briefing. Instead of naive date filters, Tacit ranks decisions using a multi-signal scoring curve:
 $$\text{Score}(d) = 0.35 \cdot \text{Impact}(d) + 0.40 \cdot \text{Centrality}(d) + 0.25 \cdot \text{Recency}(d) - \text{Penalty}(d)$$
 * **DAG Centrality**: Foundational decisions that later choices depend on are amplified ($f_{\text{centrality}} = \frac{n}{n + 8}$).
-* **Recency Decay**: A 6-month half-life curve keeps advice fresh without dropping core principles ($f_{\text{recency}} = 0.5^{(\text{age\_days} / 180)}$).
+* **Recency Decay**: A 6-month half-life curve keeps advice fresh without dropping core principles ($f_{\text{recency}} = 0.5^{(\text{days} / 180)}$).
 * **Token Budgeting**: Assembles the top context into **Tier 1 (deep reading with lineage)** and **Tier 2 (one-liner summaries by tag)** within your configured token budget (`TACIT_TOKEN_BUDGET`).
 
 #### 2. Causal DAG and The "REPLACED" Sticker System
