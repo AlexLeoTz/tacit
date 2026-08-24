@@ -132,11 +132,8 @@ pip install -e .
 ### Step 2: Register MCP server globally
 This registration command modifies your editor configuration globally. It can be run from any folder:
 ```bash
-# For Antigravity CLI
+# For Antigravity IDE & CLI
 tacit install-mcp --client antigravity
-
-# For Claude Desktop
-tacit install-mcp --client claude
 
 # For Claude Code (Terminal CLI)
 tacit install-mcp --client claude-code
