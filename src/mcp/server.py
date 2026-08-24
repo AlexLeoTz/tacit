@@ -117,18 +117,22 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         return (
             "You are equipped with Tacit tools for maintaining persistent institutional memory.\n"
             "Follow these strict architectural protocols:\n\n"
-            "1. SESSION BOOTSTRAP: At the start of a session or when exploring a codebase area, call `memory_context()` "
+            "WHAT TACIT STORES VS WHAT NOT TO STORE:\n"
+            "- ONLY store distilled tacit knowledge: non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.\n"
+            "- NEVER store raw chat history/transcripts, terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code or log sink.\n\n"
+            "MANDATORY AGENT WORKFLOW:\n"
+            "1. SESSION BOOTSTRAP: At session start or when beginning a new task, call `memory_context()` "
             "to receive an intelligent relevance-ranked briefing of active architectural patterns, critical commands, hacks, and solved errors.\n\n"
-            "2. TAXONOMY & CAUSAL LINEAGE: When calling `memory_add`, always provide:\n"
+            "2. PRE-DECISION VALIDATION: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST search Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.\n\n"
+            "3. TAXONOMY & CAUSAL LINEAGE: When calling `memory_add`, always provide:\n"
             "   - `tags`: At least 2 specific keywords (e.g. ['auth', 'jwt', 'security']).\n"
             "   - `scope`: Subsystem or directory path affected (e.g. ['/api/auth']).\n"
             "   - `parents`: Link the UUID(s) of any past decisions from `memory_context` that this new entry modifies, extends, or is derived from.\n"
             "   - `supersedes`: Link the UUID(s) of any previous decisions that this change directly invalidates or replaces.\n\n"
-            "3. END-OF-TASK SELF-REFLECTION: At the conclusion of any non-trivial coding task, ask yourself:\n"
+            "4. END-OF-TASK SELF-REFLECTION: At the conclusion of any non-trivial coding task, ask yourself:\n"
             "   'Did I make a key architectural choice, establish a reusable command, implement a tricky bugfix, or apply/invalidate a workaround?'\n"
             "   - If YES, record it using `memory_add`. If invalidating past guidance, include `supersedes=[<id>]`.\n"
-            "   - If NO (e.g., minor typo/formatting), do not add noise to memory.\n\n"
-            "4. TARGETED SEARCH: Use `memory_search` to query past decisions before introducing new libraries, databases, or schemas."
+            "   - If NO (e.g., minor typo/formatting), do not add noise to memory."
         )
 
     return mcp

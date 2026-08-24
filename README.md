@@ -205,6 +205,16 @@ When you run `tacit init` in any project, it generates rule files automatically:
 * **Cursor**: `.cursorrules`
 * **MCP Prompts**: Exposed directly over the MCP protocol as `tacit-instructions`.
 
+### What Tacit Stores vs What It Does NOT Store
+* **Tacit Stores**: Distilled tacit knowledge: non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
+* **Tacit Does NOT Store**: Raw chat history, full conversation logs, copy-pasted terminal output, or entire source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
+
+### Agent Workflow Protocols
+1. **Bootstrap (`memory_context`)**: Query project context at the start of a session or when working in a new area.
+2. **Pre-Decision Validation**: Before proposing, planning, or implementing any architectural change, library addition, or refactor, the agent checks memory to verify if that decision is allowed or if an earlier attempt was already invalidated.
+3. **Lineage (`parents` & `supersedes`)**: Link new decisions to parent nodes or indicate when a past decision is being superseded.
+4. **Autonomous Self-Reflection**: At the conclusion of non-trivial tasks, record new distilled tacit knowledge.
+
 ---
 
 ## 4. CLI Usage and Commands
