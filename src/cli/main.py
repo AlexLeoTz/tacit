@@ -770,6 +770,10 @@ def install_mcp(
         if "mcpServers" not in existing_data:
             existing_data["mcpServers"] = {}
 
+        # Remove any legacy aliases
+        existing_data["mcpServers"].pop("project-memory", None)
+        existing_data["mcpServers"].pop("pmc", None)
+
         existing_data["mcpServers"]["tacit"] = config_entry
         config_path.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
 
