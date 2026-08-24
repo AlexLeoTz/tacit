@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from src.core.storage import MemoryStorage
 from src.mcp.handlers import MemoryMCPHandlers
+from src.mcp.server import create_mcp_server
 from src.cli.main import app
 from src.utils.config import Config
 
@@ -173,3 +174,41 @@ def test_delete_cli_command():
         assert del_result.exit_code == 0
         assert "Successfully deleted" in del_result.output
 
+
+def test_memory_add_aliases_and_missing_content():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        test_dir = Path(tmpdir) / "alias_test"
+        db_path = Config.get_db_path(test_dir)
+        storage = MemoryStorage(db_path)
+        handlers = MemoryMCPHandlers(default_storage=storage)
+
+        # 1. Test passing category instead of type and rationale instead of content
+        res = handlers.handle_memory_add(
+            category="architecture",
+            rationale="Cloud SQL multi-region failover",
+            tags=["cloud-sql", "deployment"],
+            impact="high",
+        )
+        assert res["success"] is True
+        node_id = res["id"]
+
+        get_res = handlers.handle_memory_get(node_id)
+        assert get_res["found"] is True
+        assert get_res["memory"]["type"] == "architecture"
+        assert "Cloud SQL" in get_res["memory"]["content"]
+
+        # 2. Test server FastMCP tool execution directly
+        server = create_mcp_server(storage)
+        # Verify tool can be called without explicit content argument if category/rationale/summary provided
+        tool_fn = None
+        for tool in server._tool_manager.list_tools():
+            if tool.name == "memory_add":
+                tool_fn = tool.fn
+                break
+        if tool_fn:
+            result_str = tool_fn(
+                category="hack",
+                description="Workaround for connection pooling",
+                tags=["db"],
+            )
+            assert "recorded" in result_str.lower()

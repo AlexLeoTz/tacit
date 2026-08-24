@@ -45,7 +45,7 @@ class MemoryMCPHandlers:
 
     def handle_memory_add(
         self,
-        content: str,
+        content: str = "",
         type: str = "decision",
         summary: str = "",
         title: str = "",
@@ -59,6 +59,12 @@ class MemoryMCPHandlers:
         relation_note: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         project: Optional[str] = None,
+        category: Optional[str] = None,
+        rationale: Optional[str] = None,
+        description: Optional[str] = None,
+        text: Optional[str] = None,
+        details: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create and store an immutable memory node in target project storage."""
         storage = self._resolve_storage(project)
@@ -68,6 +74,34 @@ class MemoryMCPHandlers:
         supersedes = supersedes or []
         related = related or []
         metadata = metadata or {}
+
+        # Resolve content and type from common agent aliases
+        content = content or rationale or description or text or details or summary or title or "Recorded memory node"
+        raw_type = category or type or "decision"
+        type_mapping = {
+            "architectural": "architecture",
+            "architectures": "architecture",
+            "decisions": "decision",
+            "commands": "command",
+            "hacks": "hack",
+            "workaround": "hack",
+            "workarounds": "hack",
+            "bugfix": "hack",
+            "errors": "error",
+            "bug": "error",
+            "bugs": "error",
+            "exception": "error",
+            "general": "context",
+            "info": "context",
+            "note": "context",
+            "notes": "context",
+        }
+        type = type_mapping.get(str(raw_type).lower(), str(raw_type).lower())
+        if type not in ("decision", "command", "hack", "architecture", "error", "context"):
+            type = "decision"
+        summary = summary or title or (content[:100] + ("..." if len(content) > 100 else ""))
+        title = title or f"{type.capitalize()}: {summary[:50]}"
+        relation_note = relation_note or reason
 
         # Pre-flight check: If agent didn't provide parents, check for existing similar memories
         linked_hint = ""
@@ -88,8 +122,8 @@ class MemoryMCPHandlers:
             id=str(uuid.uuid4()),
             timestamp=datetime.now().astimezone().timestamp(),
             content=content,
-            summary=summary or (content[:100] + ("..." if len(content) > 100 else "")),
-            title=title or f"{type.capitalize()}: {content[:50]}",
+            summary=summary,
+            title=title,
             type=type,
             tags=tags,
             scope=scope,
