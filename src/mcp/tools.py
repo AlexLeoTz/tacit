@@ -62,24 +62,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional explanation for why this memory supersedes or derives from its parents.",
                 },
-                "category": {
-                    "type": "string",
-                    "description": "Alias for 'type' (e.g. 'decision', 'hack', 'architecture').",
-                },
-                "rationale": {
-                    "type": "string",
-                    "description": "Alias for 'content' explaining technical rationale.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Alias for 'content'.",
-                },
                 "project": {
                     "type": "string",
                     "description": "Optional project name or project root path. If omitted, uses current workspace.",
                 },
             },
-            "required": [],
+            "required": ["content"],
         },
     },
     {

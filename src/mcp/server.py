@@ -16,7 +16,7 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
 
     @mcp.tool()
     def memory_add(
-        content: str = "",
+        content: str,
         type: str = "decision",
         summary: str = "",
         title: str = "",
@@ -29,12 +29,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         author: str = "ai-agent",
         relation_note: Optional[str] = None,
         project: Optional[str] = None,
-        category: Optional[str] = None,
-        rationale: Optional[str] = None,
-        description: Optional[str] = None,
-        text: Optional[str] = None,
-        details: Optional[str] = None,
-        reason: Optional[str] = None,
     ) -> str:
         """Add a persistent memory entry (decision, command, hack, architecture, error, context) to target project.
 
@@ -54,12 +48,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             author=author,
             relation_note=relation_note,
             project=project,
-            category=category,
-            rationale=rationale,
-            description=description,
-            text=text,
-            details=details,
-            reason=reason,
         )
         return res.get("message") or json.dumps(res, indent=2)
 
