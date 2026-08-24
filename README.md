@@ -222,31 +222,6 @@ When you run `tacit init` in any project, it generates rule files automatically:
 * **Cursor**: `.cursorrules`
 * **MCP Prompts**: Exposed directly over the MCP protocol as `tacit-instructions`.
 
-Template content:
-
-```markdown
-# Autonomous Institutional Memory Rules (Tacit)
-
-You are connected to Tacit to preserve engineering decisions across chat resets.
-
-## What to Store:
-* Distilled tacit knowledge: non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
-* Do not store raw code files, full conversation logs, or large copied transcripts. Keep entries concise.
-
-## Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
-2. **Causal Lineage and Taxonomy**: When calling `memory_add`, always specify:
-   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
-   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths exist in the codebase.
-   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
-   - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
-3. **End-of-Task Checkpoint**:
-   - At the conclusion of any non-trivial coding task, ask yourself:
-     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a deployment command?"
-   - If yes, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, or `error`). If invalidating a past decision, specify `supersedes=[<id>]`.
-   - If no (e.g. routine refactor or typo fix), do not record an entry.
-```
-
 ---
 
 ## 4. CLI Usage and Commands
