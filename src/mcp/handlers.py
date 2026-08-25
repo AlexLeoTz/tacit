@@ -26,16 +26,25 @@ class MemoryMCPHandlers:
 
     def _resolve_storage(self, project: Optional[str] = None) -> MemoryStorage:
         """Resolve or initialize SQLite storage for a given project path or active workspace."""
+        if self._default_storage and not project:
+            return self._default_storage
+
         if project:
             registered = Config.list_registered_projects()
             target_path_str = registered.get(project, project)
-            project_root = Config.find_project_root(target_path_str)
+            try:
+                project_root = Config.find_project_root(target_path_str)
+            except Exception:
+                project_root = Path(target_path_str)
         elif self._default_storage:
             return self._default_storage
         else:
             project_root = Config.find_project_root()
 
         key = str(project_root.resolve())
+        if self._default_storage and self._default_storage.db_path.parent == project_root:
+            return self._default_storage
+
         if key not in self._storage_cache:
             Config.ensure_directories(project_root)
             db_path = Config.get_db_path(project_root)
@@ -69,23 +78,56 @@ class MemoryMCPHandlers:
         related = related or []
         metadata = metadata or {}
 
-        # Pre-flight check: If agent didn't provide parents, check for existing similar memories
+        # Interactive orphan warning & Intelligent auto-link
+        warning_msg = ""
         linked_hint = ""
+        suggested_candidates: List[Dict[str, Any]] = []
+
         if not parents and not supersedes:
-            pre_flight_query = title or summary or content[:100]
-            existing_matches = storage.search_full_text(query=pre_flight_query, limit=3, memory_type=type)
-            if existing_matches:
-                top_match = existing_matches[0]
-                # If top match is highly relevant, link it as parent
-                parents = [top_match.id]
-                linked_hint = f" (Auto-linked to related ancestor: '{top_match.title or top_match.summary}' [`{top_match.id[:8]}`])"
+            # Look up high-confidence candidate parents across scope, tags, and content
+            candidates = storage.find_candidate_parents(
+                scope=scope,
+                tags=tags,
+                title=title,
+                summary=summary,
+                content=content,
+                limit=3,
+            )
+            if candidates:
+                top_cand = candidates[0]
+                # If confidence is very high (>= 0.50), auto-link
+                if top_cand["score"] >= 0.50:
+                    top_node = top_cand["node"]
+                    parents = [top_node.id]
+                    reasons_str = ", ".join(top_cand["reasons"])
+                    linked_hint = f" (Auto-linked to parent: '{top_node.title or top_node.summary}' [`{top_node.id[:8]}`] via {reasons_str})"
+                else:
+                    # Provide interactive warning with suggested parent candidates and memory_link instructions
+                    suggested_candidates = candidates
+                    cand_lines = []
+                    for c in candidates:
+                        cn = c["node"]
+                        reasons_str = ", ".join(c["reasons"])
+                        cand_lines.append(f"  • [`{cn.id[:8]}`] ({cn.type}) \"{cn.title or cn.summary}\" (affinity: {c['score']:.2f}, {reasons_str})")
+                    
+                    warning_msg = (
+                        f"\n\n[TACIT GRAPH NOTICE]: This entry was created as an isolated ORPHAN node (no `parents` provided).\n"
+                        f"Found {len(candidates)} potential causal parent(s) in this scope/subsystem:\n"
+                        + "\n".join(cand_lines) + "\n"
+                        f"If this memory is derived from or resolves one of these, please link it using:\n"
+                        f"  `memory_link(child_id=\"{node_id_placeholder}\", parent_id=\"<candidate-id>\")`"
+                    )
 
         # Validate scope paths exist in target project root
         from ..core.memory_node import validate_scope_paths
         validate_scope_paths(scope, project)
 
+        node_id = str(uuid.uuid4())
+        if warning_msg:
+            warning_msg = warning_msg.replace("{node_id_placeholder}", node_id)
+
         node = MemoryNode(
-            id=str(uuid.uuid4()),
+            id=node_id,
             timestamp=datetime.now().astimezone().timestamp(),
             content=content,
             summary=summary,
@@ -116,13 +158,49 @@ class MemoryMCPHandlers:
                 "parents": parents,
                 "supersedes": supersedes,
                 "content_hash": node.content_hash,
-                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}",
+                "suggested_parents": [
+                    {"id": c["node"].id, "summary": c["node"].summary, "type": c["node"].type, "score": c["score"]}
+                    for c in suggested_candidates
+                ],
+                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}{warning_msg}",
             }
         else:
             return {
                 "success": False,
                 "id": node.id,
                 "message": f"Failed to record memory{proj_label}: duplicate or integrity error.",
+            }
+
+    def handle_memory_link(
+        self,
+        child_id: str,
+        parent_id: str,
+        relation: str = "derives_from",
+        reason: Optional[str] = None,
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Explicitly link two memory nodes together in the causal graph."""
+        storage = self._resolve_storage(project)
+        success = storage.link_nodes(
+            child_id=child_id,
+            parent_id=parent_id,
+            relation=relation,
+            reason=reason,
+        )
+        if success:
+            return {
+                "success": True,
+                "child_id": child_id,
+                "parent_id": parent_id,
+                "relation": relation,
+                "message": f"Successfully linked `{child_id[:8]}` -> `{parent_id[:8]}` (relation: '{relation}')",
+            }
+        else:
+            return {
+                "success": False,
+                "child_id": child_id,
+                "parent_id": parent_id,
+                "message": f"Failed to link `{child_id}` -> `{parent_id}`: one or both nodes do not exist.",
             }
 
     def handle_memory_add_batch(

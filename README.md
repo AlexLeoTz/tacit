@@ -91,7 +91,13 @@ Zero cloud API keys, zero PyTorch dependencies (~50MB ONNX runtime). Combines ex
 $$\text{RRF}(d) = \sum_{r \in \text{channels}} \frac{1}{60 + \text{rank}_r(d)}$$
 Queries execute in under 5 milliseconds on your local CPU with automatic scope and recency boosting.
 
-#### 5. Cryptographic Proofs and Dual-Write Storage
+#### 5. Multi-Tier Candidate Auto-Linking & Interactive Orphan Warnings
+To prevent isolated orphan nodes and guarantee graph lineage:
+* **Multi-Signal Affinity Ranking**: Evaluates Scope Overlap (0.40), Tag Jaccard Similarity (0.30), Keyword Overlap (0.20), Cross-Type Causality (e.g. `error` $\rightarrow$ `decision`, 0.08), and Recency Decay (0.10).
+* **Automatic High-Confidence Linking ($\ge 0.50$)**: High-affinity parents are automatically attached and annotated.
+* **Interactive Graph Notice ($0.15 \le \text{Score} < 0.50$)**: Emits a `[TACIT GRAPH NOTICE]` in the tool result with ranked candidate parents and ready-to-run `memory_link` commands so the agent can quickly connect relationships.
+
+#### 6. Cryptographic Proofs and Dual-Write Storage
 * Every memory is addressed by its **SHA-256 content hash** and linked via a **Merkle root**. `tacit verify` verifies history has not been altered.
 * **Dual-Write**: Saves to `memory.db` for fast agent queries and maintains human-readable `.md` files in `.tacit/<category>/`.
 
@@ -357,7 +363,8 @@ When connected via MCP, AI agents have access to the following 6 tools:
 
 | Tool | Purpose | Key Arguments |
 |---|---|---|
-| `memory_add` | Persist an immutable decision, command, hack, architecture, or error. Supports superseding past decisions. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
+| `memory_add` | Persist an immutable decision, command, hack, architecture, or error. Supports auto-linking and orphan warnings. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
+| `memory_link` | Explicitly attach or adjust causal edges between nodes (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
 | `memory_search` | Hybrid search (BM25 + fastembed ONNX dense vectors via RRF). | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
 | `memory_get` | Fetch markdown content and Merkle lineage by ID. Shows alert banners if superseded or retracted. | `node_id` |
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |

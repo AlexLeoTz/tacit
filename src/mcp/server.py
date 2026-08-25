@@ -44,8 +44,8 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             tags=tags or [],
             scope=scope or [],
             impact=impact,
-            parents=parents or [],
-            supersedes=supersedes or [],
+            parents=parents,
+            supersedes=supersedes,
             related=related or [],
             author=author,
             relation_note=relation_note,
@@ -119,6 +119,27 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             project=project,
         )
         return res.get("formatted") or json.dumps(res, indent=2)
+
+    @mcp.tool()
+    def memory_link(
+        child_id: str,
+        parent_id: str,
+        relation: str = "derives_from",
+        reason: Optional[str] = None,
+        project: Optional[str] = None,
+    ) -> str:
+        """Connect two memory nodes in the causal DAG (relation: 'derives_from', 'supersedes', or 'related').
+        
+        Use this when an orphan memory node was created or when resolving an error with a decision.
+        """
+        res = handlers.handle_memory_link(
+            child_id=child_id,
+            parent_id=parent_id,
+            relation=relation,
+            reason=reason,
+            project=project,
+        )
+        return res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool()
     def memory_projects() -> str:

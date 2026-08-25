@@ -246,3 +246,51 @@ def test_memory_add_strict_schema():
                 tags=["db"],
             )
             assert "recorded" in result_str.lower()
+
+
+def test_orphan_warning_and_memory_link():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        test_dir = Path(tmpdir) / "orphan_test"
+        db_path = Config.get_db_path(test_dir)
+        storage = MemoryStorage(db_path)
+        handlers = MemoryMCPHandlers(default_storage=storage)
+
+        # 1. Add an initial error memory
+        err_res = handlers.handle_memory_add(
+            content="SQLite database locked error on concurrent writes in multi-threaded setup",
+            summary="SQLite database locked error",
+            title="Database Locked Exception",
+            type="error",
+            tags=["sqlite", "database", "concurrency"],
+            scope=["src/core/storage.py"],
+        )
+        assert err_res["success"] is True
+        error_id = err_res["id"]
+
+        # 2. Add a decision in same scope/tags with no parents provided - should trigger candidate detection & warning
+        dec_res = handlers.handle_memory_add(
+            content="Add SQLite connection locking and retry mechanism for storage layer",
+            summary="Add SQLite lock handling",
+            title="SQLite Connection Locking",
+            type="decision",
+            tags=["sqlite", "concurrency"],
+            scope=["src/core/storage.py"],
+        )
+        assert dec_res["success"] is True
+        decision_id = dec_res["id"]
+        # Top score >= 0.50 should auto-link, or provide suggested parents & notice
+        assert (error_id in dec_res["parents"]) or ("TACIT GRAPH NOTICE" in dec_res["message"] or len(dec_res.get("suggested_parents", [])) > 0)
+
+        # 3. Test explicit linking via handle_memory_link
+        link_res = handlers.handle_memory_link(
+            child_id=decision_id,
+            parent_id=error_id,
+            relation="derives_from",
+            reason="Decision directly fixes SQLite lock error",
+        )
+        assert link_res["success"] is True
+
+        # 4. Verify updated parent edge
+        updated_node = storage.get_memory(decision_id)
+        assert error_id in updated_node.parents
+

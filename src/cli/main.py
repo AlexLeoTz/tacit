@@ -118,6 +118,11 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
   2. The `decision` or `hack` node (documenting the architectural fix or workaround).
 * **Use `memory_add_batch`** to insert multiple related entries in a single call. You can reference previous items in the batch using `$prev` or `$0` in the `parents` field to link them into the causal graph automatically.
 
+## Preventing Orphan Nodes & Causal Graph Integrity:
+* **NEVER Create Orphan Nodes Blindly**: Unless you are creating a completely new, greenfield feature or root architecture, every `decision`, `hack`, `command`, or `error` is derived from, fixes, or relates to an existing component or prior memory.
+* **Always Check for Existing Parents First**: Check `memory_context()` or `memory_search()` to identify relevant parent UUIDs before calling `memory_add`.
+* **Heed Interactive Warnings**: If `memory_add` responds with a `[TACIT GRAPH NOTICE]` suggesting candidate parents, immediately review them and call `memory_link(child_id=..., parent_id=...)` to preserve graph lineage.
+
 ## Mandatory Agent Workflow:
 1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
 2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.

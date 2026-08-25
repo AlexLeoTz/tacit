@@ -439,6 +439,191 @@ class MemoryStorage:
             finally:
                 conn.close()
 
+    def find_candidate_parents(
+        self,
+        scope: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        title: str = "",
+        summary: str = "",
+        content: str = "",
+        exclude_ids: Optional[List[str]] = None,
+        limit: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Find ranked candidate parent nodes based on scope overlap, tag similarity, text BM25/FTS, and recency."""
+        exclude_set = set(exclude_ids or [])
+        scope = [s.strip().replace("\\", "/").lower() for s in (scope or []) if s.strip()]
+        tags_set = set(t.strip().lower() for t in (tags or []) if t.strip())
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                # Fetch recent active memories as candidate pool
+                rows = conn.execute("""
+                    SELECT *
+                    FROM memories
+                    WHERE status = 'active' OR status IS NULL
+                    ORDER BY timestamp DESC
+                    LIMIT 150
+                """).fetchall()
+
+                if not rows:
+                    return []
+
+                import json
+                candidates = []
+                now = rows[0]["timestamp"] if rows else 0
+
+                query_text = f"{title} {summary}".strip().lower()
+                query_tokens = set(query_text.split()) if query_text else set()
+
+                def _parse_list(val):
+                    if isinstance(val, list):
+                        return val
+                    if isinstance(val, str):
+                        try:
+                            res = json.loads(val)
+                            if isinstance(res, list):
+                                return res
+                        except Exception:
+                            pass
+                    return []
+
+                for r in rows:
+                    node_id = r["id"]
+                    if node_id in exclude_set:
+                        continue
+
+                    r_tags = [str(t).lower() for t in _parse_list(r["tags"])]
+                    r_scope = [str(s).replace("\\", "/").lower() for s in _parse_list(r["scope"])]
+                    r_title = (r["title"] or "").lower()
+                    r_summary = (r["summary"] or "").lower()
+                    r_type = r["type"]
+
+                    score = 0.0
+                    reasons = []
+
+                    # 1. Scope overlap (Strongest signal: 0.40)
+                    if scope and r_scope:
+                        scope_match = False
+                        for s1 in scope:
+                            for s2 in r_scope:
+                                if s1 == s2 or s1.startswith(s2) or s2.startswith(s1):
+                                    scope_match = True
+                                    break
+                            if scope_match:
+                                break
+                        if scope_match:
+                            score += 0.40
+                            reasons.append("scope overlap")
+
+                    # 2. Tag similarity (Jaccard: 0.30)
+                    if tags_set and r_tags:
+                        r_tags_set = set(r_tags)
+                        inter = tags_set.intersection(r_tags_set)
+                        if inter:
+                            jaccard = len(inter) / len(tags_set.union(r_tags_set))
+                            score += jaccard * 0.30
+                            reasons.append(f"shared tags: {', '.join(inter)}")
+
+                    # 3. Text / Keyword overlap in title/summary (0.20)
+                    if query_tokens:
+                        r_text_tokens = set(f"{r_title} {r_summary}".split())
+                        text_inter = query_tokens.intersection(r_text_tokens)
+                        if text_inter:
+                            overlap_ratio = min(1.0, len(text_inter) / max(1, len(query_tokens)))
+                            score += overlap_ratio * 0.20
+                            reasons.append("keyword overlap")
+
+                    # 4. Natural Causal Type Affinity (0.10)
+                    # e.g., an error is a natural parent for decision/hack
+                    if r_type == "error":
+                        score += 0.08
+                        reasons.append("resolves error")
+                    elif r_type in ("architecture", "decision"):
+                        score += 0.04
+
+                    # 5. Recency decay bonus (up to 0.10)
+                    age_seconds = max(0, now - r["timestamp"])
+                    recency_factor = max(0.0, 1.0 - (age_seconds / (14 * 86400)))  # decays over 14 days
+                    score += recency_factor * 0.10
+
+                    if score >= 0.15:  # Minimum threshold for relevancy
+                        node = MemoryNode(
+                            id=node_id,
+                            timestamp=float(r["timestamp"]),
+                            content=r["content"],
+                            summary=r["summary"] or "",
+                            title=r["title"] or "",
+                            type=r_type,
+                            tags=r_tags,
+                            scope=r_scope,
+                            impact=r["impact"] if "impact" in r.keys() else "medium",
+                            parents=_parse_list(r["parents"]) if "parents" in r.keys() else [],
+                            author=r["author"] if "author" in r.keys() and r["author"] else "ai-agent",
+                            status=r["status"] if "status" in r.keys() and r["status"] else "active",
+                        )
+                        candidates.append({
+                            "node": node,
+                            "score": round(score, 3),
+                            "reasons": reasons,
+                        })
+
+                # Sort by score descending
+                candidates.sort(key=lambda c: c["score"], reverse=True)
+                return candidates[:limit]
+            finally:
+                conn.close()
+
+    def link_nodes(
+        self,
+        child_id: str,
+        parent_id: str,
+        relation: str = "derives_from",
+        reason: Optional[str] = None,
+        actor: str = "ai-agent",
+    ) -> bool:
+        """Add a causal edge between two existing nodes and update child's parents array."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                # Validate both nodes exist
+                child_row = conn.execute("SELECT * FROM memories WHERE id = ?", (child_id,)).fetchone()
+                parent_row = conn.execute("SELECT * FROM memories WHERE id = ?", (parent_id,)).fetchone()
+                if not child_row or not parent_row:
+                    return False
+
+                import json
+                import time
+                timestamp = time.time()
+
+                # Insert edge
+                conn.execute("""
+                    INSERT OR REPLACE INTO edges (child_id, parent_id, relation, reason, created_at, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (child_id, parent_id, relation, reason, timestamp, actor))
+
+                # Update child parents / supersedes array if needed
+                child_parents = json.loads(child_row["parents"] or "[]")
+                if relation == "derives_from" and parent_id not in child_parents:
+                    child_parents.append(parent_id)
+                    conn.execute("UPDATE memories SET parents = ? WHERE id = ?", (json.dumps(child_parents), child_id))
+
+                if relation == "supersedes":
+                    conn.execute("UPDATE memories SET status = 'superseded' WHERE id = ?", (parent_id,))
+
+                # Record lifecycle event
+                conn.execute("""
+                    INSERT INTO lifecycle_events (node_id, event, actor, reason, at)
+                    VALUES (?, 'linked', ?, ?, ?)
+                """, (child_id, actor, f"Linked {relation} -> {parent_id}" + (f" ({reason})" if reason else ""), timestamp))
+
+                conn.commit()
+                return True
+            except Exception:
+                return False
+            finally:
+                conn.close()
+
     def get_edges(self) -> List[Dict[str, Any]]:
         """Get all relational graph edges."""
         with self._lock:
