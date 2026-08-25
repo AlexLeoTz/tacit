@@ -125,6 +125,81 @@ class MemoryMCPHandlers:
                 "message": f"Failed to record memory{proj_label}: duplicate or integrity error.",
             }
 
+    def handle_memory_add_batch(
+        self,
+        entries: List[Dict[str, Any]],
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Record multiple memory nodes in a single call with intra-batch parent referencing."""
+        if not entries:
+            return {
+                "success": False,
+                "count": 0,
+                "results": [],
+                "message": "No memory entries provided in batch.",
+            }
+
+        created_nodes: List[Dict[str, Any]] = []
+        created_ids: List[str] = []
+        messages: List[str] = []
+
+        for idx, entry in enumerate(entries):
+            # Resolve intra-batch parent/supersedes/related references like "$prev", "$0", "#0"
+            def resolve_refs(ref_list: Optional[List[str]]) -> List[str]:
+                if not ref_list:
+                    return []
+                resolved = []
+                for r in ref_list:
+                    if isinstance(r, str):
+                        if r in ("$prev", "$previous") and created_ids:
+                            resolved.append(created_ids[-1])
+                        elif (r.startswith("$") or r.startswith("#")) and r[1:].isdigit():
+                            target_idx = int(r[1:])
+                            if 0 <= target_idx < len(created_ids):
+                                resolved.append(created_ids[target_idx])
+                            else:
+                                resolved.append(r)
+                        else:
+                            resolved.append(r)
+                    else:
+                        resolved.append(str(r))
+                return resolved
+
+            entry_parents = resolve_refs(entry.get("parents"))
+            entry_supersedes = resolve_refs(entry.get("supersedes"))
+            entry_related = resolve_refs(entry.get("related"))
+
+            res = self.handle_memory_add(
+                content=entry.get("content", ""),
+                type=entry.get("type", "decision"),
+                summary=entry.get("summary", ""),
+                title=entry.get("title", ""),
+                tags=entry.get("tags"),
+                scope=entry.get("scope"),
+                impact=entry.get("impact", "medium"),
+                parents=entry_parents,
+                supersedes=entry_supersedes,
+                related=entry_related,
+                author=entry.get("author", "ai-agent"),
+                relation_note=entry.get("relation_note"),
+                metadata=entry.get("metadata"),
+                project=project,
+            )
+            if res.get("success"):
+                created_nodes.append(res)
+                created_ids.append(res["id"])
+                messages.append(res.get("message", f"Entry {idx+1} recorded"))
+            else:
+                messages.append(f"Entry {idx+1} failed: {res.get('message', 'Unknown error')}")
+
+        all_success = len(created_nodes) == len(entries)
+        return {
+            "success": all_success,
+            "count": len(created_nodes),
+            "results": created_nodes,
+            "message": f"Recorded {len(created_nodes)}/{len(entries)} memory entries in batch:\n" + "\n".join(f"- {m}" for m in messages),
+        }
+
     def handle_memory_search(
         self,
         query: str,

@@ -5,13 +5,13 @@ from typing import Any, Dict, List
 TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "memory_add",
-        "description": "Persist a new immutable memory node (decision, command, hack, architecture, error, or context) to surviving project storage.",
+        "description": "Persist a new immutable memory node (decision, command, hack, architecture, error, or context) to surviving project storage. The content field must be rich and comprehensive.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "Full detailed description, rationale, or code snippet of the memory.",
+                    "description": "Full detailed Markdown description with technical rationale, root causes, alternatives, or trade-offs. Never provide shallow 1-2 line summaries here.",
                 },
                 "type": {
                     "type": "string",
@@ -68,6 +68,41 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["content"],
+        },
+    },
+    {
+        "name": "memory_add_batch",
+        "description": "Persist multiple related memory entries in a single batch (e.g. recording both an 'error' and the subsequent 'decision' or 'hack'). Entries can reference earlier batch items using '$prev' or '$0' in parents/supersedes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "Comprehensive Markdown explanation."},
+                            "type": {"type": "string", "enum": ["decision", "command", "hack", "architecture", "error", "context"], "default": "decision"},
+                            "summary": {"type": "string", "description": "1-sentence summary."},
+                            "title": {"type": "string", "description": "Short title."},
+                            "tags": {"type": "array", "items": {"type": "string"}},
+                            "scope": {"type": "array", "items": {"type": "string"}},
+                            "impact": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium"},
+                            "parents": {"type": "array", "items": {"type": "string"}, "description": "Parent IDs or intra-batch references like '$prev' or '$0'."},
+                            "supersedes": {"type": "array", "items": {"type": "string"}},
+                            "related": {"type": "array", "items": {"type": "string"}},
+                            "relation_note": {"type": "string"},
+                        },
+                        "required": ["content"],
+                    },
+                    "description": "List of memory entries to record in order.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional project name or root path.",
+                },
+            },
+            "required": ["entries"],
         },
     },
     {

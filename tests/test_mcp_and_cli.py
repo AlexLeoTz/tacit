@@ -55,6 +55,41 @@ def test_mcp_add_and_search(mcp_fixture):
     assert "DECISION" in context_res["formatted"] or "Core context" in context_res["formatted"]
 
 
+def test_mcp_add_batch(mcp_fixture):
+    storage, handlers = mcp_fixture
+
+    entries = [
+        {
+            "content": "Database pool exhaustion under high concurrent load with error: OperationalError('too many connections')",
+            "type": "error",
+            "title": "Postgres Pool Exhaustion",
+            "tags": ["postgres", "error", "pool"],
+            "impact": "high",
+        },
+        {
+            "content": "Increased database pool max overflow to 50 and tuned recycle time to 1800s to resolve connection exhaustion.",
+            "type": "decision",
+            "title": "Tuned Postgres Pool Capacity",
+            "tags": ["postgres", "decision", "pool"],
+            "impact": "high",
+            "parents": ["$prev"],
+        },
+    ]
+
+    batch_res = handlers.handle_memory_add_batch(entries)
+    assert batch_res["success"] is True
+    assert batch_res["count"] == 2
+    assert len(batch_res["results"]) == 2
+
+    error_id = batch_res["results"][0]["id"]
+    decision_id = batch_res["results"][1]["id"]
+
+    # Verify that the second node's parent is the first node's ID
+    node_decision = storage.get_memory(decision_id)
+    assert node_decision is not None
+    assert error_id in node_decision.parents
+
+
 def test_cli_commands():
     runner = CliRunner()
     with tempfile.TemporaryDirectory() as tmpdir:

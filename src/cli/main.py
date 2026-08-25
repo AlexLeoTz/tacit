@@ -89,18 +89,47 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **ONLY Store Distilled Tacit Knowledge**: Record non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
 * **NEVER Store Chat History, Logs, or Code Snippets**: Do not pollute the memory database with conversation transcripts, raw terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
 
+## Rigorous Content Detail Requirements:
+* **NEVER write shallow 1-3 line entries in `content`**: The `summary` is a 1-sentence abstract, but `content` MUST be a rich, comprehensive, self-contained Markdown write-up that fully equips future agents and developers without requiring follow-up questions:
+  * **For `decision` / `architecture`**:
+    1. **Context & Problem Statement**: What problem was being solved or what motivated this decision?
+    2. **Alternatives Evaluated & Rejected**: What alternative approaches were considered, and specifically why were they rejected?
+    3. **Technical Solution & Rationale**: The concrete architectural pattern, data flow, or configuration applied.
+    4. **Trade-offs & Operational Consequences**: Negative side effects, performance implications, maintenance overhead, or future migration obligations.
+    5. **Validation & Verification**: How the implementation was verified and tested.
+  * **For `error`**:
+    1. **Symptom & Trigger Condition**: Exact error messages, stack traces, and environment conditions that triggered the failure.
+    2. **Root Cause Analysis**: Why the bug occurred at the code, compiler, runtime, or dependency level.
+    3. **Resolution / Applied Fix**: Precise code or configuration changes that eliminated the failure.
+    4. **Prevention & Regression Caveats**: Edge cases or anti-patterns to avoid in future development.
+  * **For `hack` (Workaround)**:
+    1. **Workaround Description**: Detailed explanation of the temporary workaround.
+    2. **Why Standard Approach Failed**: The upstream bug, library limitation, or environment barrier.
+    3. **Side Effects & Risks**: Known performance penalties or technical debt introduced.
+    4. **Decommissioning Criteria**: Specific conditions, upstream releases, or milestones required to remove the hack.
+  * **For `command`**:
+    1. **Exact Command Syntax**: Complete CLI invocation, required flags, and directory execution context.
+    2. **Prerequisites & Side Effects**: Database migrations, lock acquisitions, or daemon states impacted.
+    3. **When to Run vs When NOT to Run**: Critical operational guardrails.
+
+## Multi-Entry Recording (Paired Issues & Decisions):
+* When you diagnose an issue and implement a fix or architectural change, you should record **BOTH**:
+  1. The `error` node (documenting the failure symptom and root cause).
+  2. The `decision` or `hack` node (documenting the architectural fix or workaround).
+* **Use `memory_add_batch`** to insert multiple related entries in a single call. You can reference previous items in the batch using `$prev` or `$0` in the `parents` field to link them into the causal graph automatically.
+
 ## Mandatory Agent Workflow:
 1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
 2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.
-3. **Causal Lineage & Taxonomy**: When calling `memory_add`, always specify:
+3. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
    - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths actually exist in the codebase.
    - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
    - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
 4. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
    - At the conclusion of any non-trivial coding task, ask yourself:
-     "Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a vital deployment command?"
-   - If YES, record it using `memory_add` (`decision`, `architecture`, `hack`, `command`, `error`). If invalidating a past decision, specify `supersedes=[<id>]`.
+     "Did I solve a non-trivial error, make an architectural choice, apply an undocumented workaround, or execute a vital operational command?"
+   - If YES, record rich entries using `memory_add` or `memory_add_batch`. If invalidating a past decision, specify `supersedes=[<id>]`.
    - If NO (e.g., routine refactor, styling tweak, or typo fix), do not pollute project memory.
 """
     # 1. Antigravity rule
