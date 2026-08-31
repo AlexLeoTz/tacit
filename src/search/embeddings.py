@@ -38,17 +38,18 @@ class EmbeddingService:
         return os.environ.get("GEMINI_API_KEY") or self._gemini_api_key
 
     def _embed_gemini(self, texts: Sequence[str], is_query: bool = False) -> Optional[list[list[float]]]:
-        """Embed texts using Gemini text-embedding-004 REST API."""
+        """Embed texts using Gemini REST API."""
         api_key = self._get_gemini_api_key()
         if not api_key:
             return None
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key={api_key}"
+        model_name = os.environ.get("TACIT_GEMINI_MODEL", "gemini-embedding-001")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:batchEmbedContents?key={api_key}"
         task_type = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
 
         requests = [
             {
-                "model": "models/text-embedding-004",
+                "model": f"models/{model_name}",
                 "content": {"parts": [{"text": t}]},
                 "taskType": task_type,
             }
