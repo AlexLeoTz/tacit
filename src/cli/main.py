@@ -148,6 +148,33 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
     if force or not cursor_rule.exists():
         cursor_rule.write_text(rule_content, encoding="utf-8")
 
+    # 3. Check for GEMINI_API_KEY and configure embedding preferences
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    env_file = target_root / ".env"
+    if not gemini_key and env_file.exists():
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.strip().startswith("GEMINI_API_KEY="):
+                    gemini_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+        except Exception:
+            pass
+
+    embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold]"
+    if gemini_key:
+        try:
+            use_gemini = typer.confirm(
+                "\nDetected GEMINI_API_KEY. Would you like Tacit to use Google Gemini for high-precision embeddings? (Selecting 'no' will use local CPU ONNX model)",
+                default=True,
+            )
+            if use_gemini:
+                embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold green]Google Gemini (gemini-embedding-001)[/bold green]"
+            else:
+                os.environ.pop("GEMINI_API_KEY", None)
+                embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold] [dim](Gemini declined)[/dim]"
+        except Exception:
+            embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold green]Google Gemini (gemini-embedding-001)[/bold green]"
+
     console.print(
         Panel.fit(
             f"[bold green]Tacit Initialized[/bold green]\n"
@@ -155,10 +182,12 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
             f"[dim]Storage Dir:[/dim]  {Config.get_memory_dir(target_root).resolve()}\n"
             f"[dim]Database:[/dim]     {db_path.resolve()}\n"
             f"[dim]Total Memories:[/dim] {count}\n"
+            f"{embed_provider_msg}\n"
             f"[cyan]Auto-created AI agent rules in `.agents/rules/` and `.cursorrules`[/cyan]",
             border_style="green",
         )
     )
+
 
 
 
