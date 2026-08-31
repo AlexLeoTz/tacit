@@ -845,11 +845,29 @@ def update(
     git_url: str = typer.Option("https://github.com/AlexLeoTz/tacit.git", "--url", help="Git repository URL to update from"),
 ):
     """Update Tacit globally to the latest version from GitHub and refresh project rules in the current directory."""
+    import os
+    import platform
     import subprocess
     import sys
+    import time
 
     console.print("[cyan]Updating Tacit globally...[/cyan]")
     pip_target = f"git+{git_url}"
+
+    # On Windows, running tacit.exe processes lock python executable scripts and .exe wrappers.
+    # Automatically terminate any background tacit serve/mcp instances (except current PID) so pip won't get PermissionError
+    if platform.system().lower() == "windows":
+        current_pid = os.getpid()
+        try:
+            # Terminate background tacit.exe instances
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "tacit.exe", "/FI", f"PID ne {current_pid}"],
+                capture_output=True,
+                check=False,
+            )
+            time.sleep(0.5)
+        except Exception:
+            pass
 
     current_root = Config.find_project_root()
     is_local_dev = (current_root / "setup.py").exists() and (current_root / ".git").exists()
@@ -864,7 +882,8 @@ def update(
             except Exception as e:
                 console.print(f"[yellow]Warning: Could not run git pull: {e}[/yellow]")
 
-            cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
+            # Use --no-deps and --no-build-isolation to avoid binary re-creation conflicts
+            cmd = [sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."]
             result = subprocess.run(cmd, cwd=current_root, capture_output=True, text=True, check=False)
         else:
             # Update the global python package via pip with force-reinstall and no-cache-dir
@@ -872,16 +891,16 @@ def update(
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode != 0:
-            if not is_local_dev and (current_root / "setup.py").exists():
-                console.print("[yellow]Remote pip install returned error, upgrading via local editable mode...[/yellow]")
-                subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=current_root, check=False)
-            else:
+            if is_local_dev or (current_root / "setup.py").exists():
+                console.print("[yellow]Retrying upgrade via editable mode...[/yellow]")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."], cwd=current_root, capture_output=True, text=True, check=False)
+
+            if result.returncode != 0:
                 console.print(f"[red]Update failed: {result.stderr}[/red]")
                 return
 
-        # 2. Refresh rules in current workspace using a fresh process of the newly updated code
+        # Refresh rules in current workspace using a fresh process of the newly updated code
         console.print("[cyan]Refreshing local workspace agent rules...[/cyan]")
-        current_root = Config.find_project_root()
         try:
             subprocess.run([sys.executable, "-m", "src.cli.main", "init", "--force"], check=False)
         except Exception:
@@ -904,6 +923,7 @@ def update(
 
 if __name__ == "__main__":
     app()
+
 
 
 

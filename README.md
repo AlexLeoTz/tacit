@@ -130,8 +130,8 @@ cd tacit
 pip install -e .
 ```
 
-> [!IMPORTANT]
-> **Windows Installation and Update Note**: Before running `pip install -e .` or `tacit update` on Windows, make sure all running Tacit instances (such as Cursor, Claude Desktop, or `tacit serve`) are stopped. Windows locks active `.exe` binaries, which will cause the installer to stop with a `PermissionError`.
+> [!TIP]
+> **Windows Update Process**: Running `tacit update` automatically clears any background `tacit serve` or MCP daemon locks before applying the upgrade, ensuring a clean and seamless update without needing manual cleanup.
 
 ---
 
