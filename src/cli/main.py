@@ -519,6 +519,14 @@ def serve(
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open preview in default browser"),
 ):
     """Start real-time Markdown preview server with WebSocket live-reload."""
+    if MarkdownPreviewServer.is_tacit_server_running(port):
+        console = Console()
+        console.print(f"[bold yellow]Notice:[/bold yellow] A Tacit server instance is already running at [bold cyan]http://localhost:{port}[/bold cyan].")
+        if open_browser:
+            import webbrowser
+            webbrowser.open(f"http://localhost:{port}")
+        raise typer.Exit(code=0)
+
     storage = get_storage(project)
     root = Config.find_project_root(project)
     out_dir = Path(output) if output else Config.get_export_dir(root)
@@ -538,6 +546,14 @@ def dashboard(
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open dashboard in default browser"),
 ):
     """Start visual Project Memory Dashboard web interface with multi-project support and live-reload."""
+    if MarkdownPreviewServer.is_tacit_server_running(port):
+        console = Console()
+        console.print(f"[bold yellow]Notice:[/bold yellow] A Tacit dashboard instance is already running at [bold cyan]http://localhost:{port}[/bold cyan].")
+        if open_browser:
+            import webbrowser
+            webbrowser.open(f"http://localhost:{port}")
+        raise typer.Exit(code=0)
+
     storage = get_storage(project)
     root = Config.find_project_root(project)
     out_dir = Path(output) if output else Config.get_export_dir(root)

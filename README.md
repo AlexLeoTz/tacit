@@ -328,11 +328,18 @@ tacit export --output ./docs/project-memories
 | `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
 | `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | FastEmbed ONNX embedding model. |
 | `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
-| `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
-| `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |
+### Live Markdown Preview Server & Visual Dashboard
+```bash
+# Start visual dashboard & live preview server (defaults to http://localhost:4000)
+tacit serve
+# Or use the dashboard alias:
+tacit dashboard
+
+# Start with custom ports or without opening a browser window
+tacit serve --port 3000 --ws-port 3001 --no-open
+```
 
 ### Visualizing Causal DAGs and Lineage
-
 ```bash
 # Renders the entire project decision DAG as a nested tree
 tacit tree
@@ -341,19 +348,59 @@ tacit tree
 tacit lineage 4a9f
 ```
 
+### Managing Registered Workspaces
+```bash
+# List all registered and discovered project workspaces on this machine
+tacit projects
+```
+
+### Deleting or Clearing Memories
+```bash
+# Delete a specific memory node from SQLite and export directory
+tacit delete <node_id>
+
+# Clear all memories from the current project database (requires confirmation)
+tacit clear
+```
+
+### Updating Tacit Globally
+```bash
+# Update Tacit to the latest version from GitHub and refresh project rule files
+tacit update
+```
+
+### Configuration Options and Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | `None` | Optional Google Gemini API key for remote `text-embedding-004` (768-dim) dense vector embeddings. If unset, automatically falls back to local fastembed ONNX on CPU. |
+| `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
+| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local FastEmbed ONNX embedding model (used when `GEMINI_API_KEY` is not provided). |
+| `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
+| `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
+| `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |
+
 ---
 
 ## 5. Live Markdown Preview Server and Dashboard
 
-Tacit includes a local web dashboard with live WebSocket reload, theme options, search, category filtering, and markdown rendering.
+Tacit includes a local interactive web dashboard (`tacit dashboard` / `tacit serve`) with live WebSocket reload, project switcher, search, category filtering, and markdown rendering.
 
 ```bash
-# 1. Start live preview server (defaults to HTTP: 4000, WebSocket: 4001 or next available)
+# 1. Start live preview server and web dashboard (defaults to HTTP: 4000, WebSocket: 4001)
 tacit serve
+# Or
+tacit dashboard
 
 # 2. Specify custom ports for both HTTP and WebSocket
 tacit serve --port 3000 --ws-port 3001
+
+# 3. Target a specific project directory
+tacit dashboard --project /path/to/another-project
 ```
+
+> **Smart Instance Detection**: If a Tacit server or dashboard is already running on port 4000, `tacit serve` detects the active instance, opens your browser to the running dashboard, and exits cleanly without spawning duplicate server processes.
+
 
 ---
 

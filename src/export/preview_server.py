@@ -36,6 +36,20 @@ class MarkdownPreviewServer:
         # Client selected project map: ws_client -> project_str
         self._client_projects: Dict[Any, str] = {}
 
+    @staticmethod
+    def is_tacit_server_running(port: int = 4000) -> bool:
+        """Check if a Tacit server is already running on the given port."""
+        import urllib.request
+        try:
+            req = urllib.request.Request(f"http://localhost:{port}/health", headers={"User-Agent": "Tacit-CLI"})
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200 and resp.read().strip() == b"OK":
+                    return True
+        except Exception:
+            pass
+        return False
+
+
     def _get_projects_list(self) -> List[Dict[str, Any]]:
         """Return list of all registered projects with counts and active state."""
         registered = Config.list_registered_projects()

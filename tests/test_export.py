@@ -43,3 +43,10 @@ def test_markdown_exporter_creates_files():
         index_text = (export_out / "INDEX.md").read_text(encoding="utf-8")
         assert "Adopt Pytest" in index_text
         assert "Hexagonal Architecture" in index_text
+
+
+def test_is_tacit_server_running():
+    from src.export.preview_server import MarkdownPreviewServer
+    # When no server running on dummy unused port
+    assert MarkdownPreviewServer.is_tacit_server_running(port=59999) is False
+

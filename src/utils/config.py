@@ -34,14 +34,57 @@ class Config:
 
     @classmethod
     def find_project_root(cls, start_path: Optional[str | Path] = None) -> Path:
-        """Discover project root by walking upwards on auto-discovery, or using explicit path when provided."""
-        if start_path:
-            explicit = Path(start_path).resolve()
-            if explicit.is_file():
-                explicit = explicit.parent
-            return explicit
-
+        """Discover project root by walking upwards on auto-discovery, or using explicit path/name when provided."""
         current = Path.cwd().resolve()
+
+        if start_path:
+            # If start_path is a Path object or already an existing filesystem directory/file
+            p = Path(start_path)
+            if p.is_absolute() and p.exists():
+                return p.parent if p.is_file() else p.resolve()
+
+            start_str = str(start_path).strip()
+
+            # Check if start_str matches current project name or any parent directory in hierarchy
+            if current.name.lower() == start_str.lower() or current.name.lower().startswith(start_str.lower()):
+                return current
+
+            for parent in current.parents:
+                if parent.name.lower() == start_str.lower():
+                    # If current workspace is a subfolder of that project (e.g. sokosupa.com inside Sokosupa)
+                    # and current workspace has its own .tacit or .git, keep current workspace root
+                    if (current / cls.DEFAULT_MEMORY_DIR_NAME).exists() or (current / ".git").exists():
+                        return current
+                    return parent.resolve()
+
+            # Check if start_path matches registered projects (exact or case-insensitive)
+            registered = cls.list_registered_projects()
+            if start_str in registered:
+                target_p = Path(registered[start_str])
+                if target_p.exists():
+                    return target_p.resolve()
+
+            for reg_name, reg_path in registered.items():
+                if reg_name.lower() == start_str.lower():
+                    target_p = Path(reg_path)
+                    if target_p.exists():
+                        return target_p.resolve()
+
+            # Check if path relative to cwd exists
+            rel = (current / p).resolve()
+            if rel.exists() and (rel / cls.DEFAULT_MEMORY_DIR_NAME).exists():
+                return rel
+
+            # If explicit path was provided and exists
+            if p.exists():
+                return p.parent if p.is_file() else p.resolve()
+
+            # Fallback to current if start_str is just a generic project name that wasn't found as a distinct folder
+            if not ("/" in start_str or "\\" in start_str):
+                return current
+
+            return rel
+
         probe = current
         while True:
             if (probe / cls.DEFAULT_MEMORY_DIR_NAME).exists():

@@ -294,3 +294,37 @@ def test_orphan_warning_and_memory_link():
         updated_node = storage.get_memory(decision_id)
         assert error_id in updated_node.parents
 
+
+def test_serve_when_already_running(monkeypatch):
+    from unittest.mock import patch
+    runner = CliRunner()
+
+    with patch("src.export.preview_server.MarkdownPreviewServer.is_tacit_server_running", return_value=True):
+        result = runner.invoke(app, ["serve", "--no-open"])
+        assert result.exit_code == 0
+        assert "A Tacit server instance is already running at" in result.output
+
+def test_project_root_parent_and_alias_resolution():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sokosupa_parent = Path(tmpdir) / "Sokosupa"
+        workspace = sokosupa_parent / "sokosupa.com"
+        workspace.mkdir(parents=True)
+        (workspace / ".tacit").mkdir()
+
+        import os
+        orig_cwd = os.getcwd()
+        try:
+            os.chdir(workspace)
+            # Passing parent folder name "Sokosupa"
+            assert Config.find_project_root("Sokosupa") == workspace.resolve()
+            # Passing lowercase "sokosupa"
+            assert Config.find_project_root("sokosupa") == workspace.resolve()
+            # Passing workspace folder name "sokosupa.com"
+            assert Config.find_project_root("sokosupa.com") == workspace.resolve()
+            # Passing None
+            assert Config.find_project_root(None) == workspace.resolve()
+        finally:
+            os.chdir(orig_cwd)
+
+
+

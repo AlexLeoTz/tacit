@@ -28,9 +28,8 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         related: Optional[List[str]] = None,
         author: str = "ai-agent",
         relation_note: Optional[str] = None,
-        project: Optional[str] = None,
     ) -> str:
-        """Add a persistent memory entry (decision, command, hack, architecture, error, context) to target project.
+        """Add a persistent memory entry (decision, command, hack, architecture, error, context) to current workspace.
 
         CONTENT REQUIREMENT: Provide a comprehensive, self-contained Markdown explanation with technical rationale,
         alternatives considered, root causes, or trade-offs. Do NOT write shallow 2-3 line summaries in content.
@@ -49,21 +48,19 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             related=related or [],
             author=author,
             relation_note=relation_note,
-            project=project,
         )
         return res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool()
     def memory_add_batch(
         entries: List[Dict[str, Any]],
-        project: Optional[str] = None,
     ) -> str:
         """Record multiple memory entries atomically in a single call (e.g. recording both an 'error' and the subsequent 'decision' or 'hack').
 
         Entries can reference previous entries in the same batch using `$prev` or index placeholders `$0`, `$1` in `parents`, `supersedes`, or `related`.
         Each entry must contain rich, detailed Markdown `content`.
         """
-        res = handlers.handle_memory_add_batch(entries=entries, project=project)
+        res = handlers.handle_memory_add_batch(entries=entries)
         return res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool()
@@ -76,7 +73,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         scope_hint: Optional[List[str]] = None,
         include_superseded: bool = False,
         debug: bool = False,
-        project: Optional[str] = None,
     ) -> str:
         """Search memory entries using hybrid BM25 / dense vector search with RRF fusion."""
         res = handlers.handle_memory_search(
@@ -88,20 +84,19 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             scope_hint=scope_hint,
             include_superseded=include_superseded,
             debug=debug,
-            project=project,
         )
         return res.get("formatted") or json.dumps(res, indent=2)
 
     @mcp.tool()
-    def memory_get(node_id: str, project: Optional[str] = None) -> str:
+    def memory_get(node_id: str) -> str:
         """Retrieve full details of a specific memory entry by UUID."""
-        res = handlers.handle_memory_get(node_id=node_id, project=project)
+        res = handlers.handle_memory_get(node_id=node_id)
         return res.get("formatted") or res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool()
-    def memory_recent(days: int = 7, limit: int = 20, project: Optional[str] = None) -> str:
+    def memory_recent(days: int = 7, limit: int = 20) -> str:
         """Get chronological recent memories created in the last N days."""
-        res = handlers.handle_memory_recent(days=days, limit=limit, project=project)
+        res = handlers.handle_memory_recent(days=days, limit=limit)
         return res.get("formatted") or json.dumps(res, indent=2)
 
     @mcp.tool()
@@ -109,14 +104,12 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         timeframe: str = "all",
         budget: Optional[int] = None,
         scope_hint: Optional[List[str]] = None,
-        project: Optional[str] = None,
     ) -> str:
         """Generate a relevance-ranked, token-budgeted project briefing based on DAG centrality, impact, and recency decay."""
         res = handlers.handle_memory_context(
             timeframe=timeframe,
             budget=budget,
             scope_hint=scope_hint,
-            project=project,
         )
         return res.get("formatted") or json.dumps(res, indent=2)
 
@@ -126,7 +119,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         parent_id: str,
         relation: str = "derives_from",
         reason: Optional[str] = None,
-        project: Optional[str] = None,
     ) -> str:
         """Connect two memory nodes in the causal DAG (relation: 'derives_from', 'supersedes', or 'related').
         
@@ -137,7 +129,6 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
             parent_id=parent_id,
             relation=relation,
             reason=reason,
-            project=project,
         )
         return res.get("message") or json.dumps(res, indent=2)
 

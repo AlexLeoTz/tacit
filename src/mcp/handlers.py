@@ -115,7 +115,7 @@ class MemoryMCPHandlers:
                         f"Found {len(candidates)} potential causal parent(s) in this scope/subsystem:\n"
                         + "\n".join(cand_lines) + "\n"
                         f"If this memory is derived from or resolves one of these, please link it using:\n"
-                        f"  `memory_link(child_id=\"{node_id_placeholder}\", parent_id=\"<candidate-id>\")`"
+                        f"  `memory_link(child_id=\"{{node_id_placeholder}}\", parent_id=\"<candidate-id>\")`"
                     )
 
         # Validate scope paths exist in target project root

@@ -62,10 +62,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional explanation for why this memory supersedes or derives from its parents.",
                 },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or project root path. If omitted, uses current workspace.",
-                },
             },
             "required": ["content"],
         },
@@ -96,10 +92,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                         "required": ["content"],
                     },
                     "description": "List of memory entries to record in order.",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or root path.",
                 },
             },
             "required": ["entries"],
@@ -151,10 +143,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "default": False,
                     "description": "Return BM25 and vector rank provenance for search tuning.",
                 },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or root path.",
-                },
             },
             "required": ["query"],
         },
@@ -168,10 +156,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "node_id": {
                     "type": "string",
                     "description": "The unique UUID of the memory node.",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or root path.",
                 },
             },
             "required": ["node_id"],
@@ -192,10 +176,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "integer",
                     "default": 20,
                     "description": "Maximum number of recent entries to return.",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or root path.",
                 },
             },
         },
@@ -220,10 +200,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "string",
                     "default": "all",
                     "description": "Optional timeframe parameter for backward compatibility.",
-                },
-                "project": {
-                    "type": "string",
-                    "description": "Optional project name or root path.",
                 },
             },
         },
