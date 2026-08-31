@@ -53,8 +53,11 @@ Tacit provides a local institutional memory layer for AI coding tools. At the st
         ▼                        ▼                        ▼
  ┌───────────────┐        ┌───────────────┐        ┌───────────────┐
  │ Hybrid Search │        │  Causal DAG   │        │ Markdown &    │
- │ (BM25 + ONNX) │        │ Lineage Engine│        │ Preview Server│
+ │ (BM25 + Dense)│        │ Lineage Engine│        │ Preview Server│
  └───────┬───────┘        └───────┬───────┘        └───────┬───────┘
+         │                        │                        │
+         ├─ Gemini (Remote API)   │                        │
+         ├─ ONNX (Local CPU)      │                        │
          │                        │                        │
          ▼                        ▼                        ▼
  ┌──────────────────────────────────────────────────────────────────┐
@@ -86,10 +89,12 @@ Tacit turns your AI coding tool into an active collaborator in memory hygiene. A
 > *"Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a deployment command?"*
 If **yes**, it records distilled tacit knowledge into `.tacit/` (linking parents and superseded IDs). If **no**, it leaves the database clean.
 
-#### 4. Local Hybrid Search (FastEmbed ONNX + BM25)
-Zero cloud API keys, zero PyTorch dependencies (~50MB ONNX runtime). Combines exact lexical matching (SQLite FTS5 / BM25) with dense semantic embeddings (`BAAI/bge-small-en-v1.5`) using **Reciprocal Rank Fusion (RRF)**:
+#### 4. Hybrid Search Engine (Gemini API & FastEmbed ONNX + BM25)
+Combines exact lexical keyword matching (SQLite FTS5 / BM25) with dense semantic embeddings using **Reciprocal Rank Fusion (RRF)**:
 $$\text{RRF}(d) = \sum_{r \in \text{channels}} \frac{1}{60 + \text{rank}_r(d)}$$
-Queries execute in under 5 milliseconds on your local CPU with automatic scope and recency boosting.
+* **Tier 1 (High-Precision Remote)**: Provide `GEMINI_API_KEY` to leverage Google's `text-embedding-004` (768-dim) dense vector embeddings.
+* **Tier 2 (Zero-Config Local CPU)**: If no key is set or offline, Tacit automatically falls back to local fastembed ONNX (`bge-small-en-v1.5`, ~50MB runtime, <5ms latency).
+* Exact symbols, flags, and error codes are protected by BM25 exact matching.
 
 #### 5. Multi-Tier Candidate Auto-Linking & Interactive Orphan Warnings
 To prevent isolated orphan nodes and guarantee graph lineage:
