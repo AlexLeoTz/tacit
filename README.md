@@ -151,6 +151,9 @@ tacit install-mcp --client claude-code
 
 # For Cursor
 tacit install-mcp --client cursor
+
+# For Deepseek harness
+tacit install-mcp --client deepseek-harness
 ```
 
 ---
