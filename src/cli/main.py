@@ -6,8 +6,9 @@ import platform
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 import uuid
+import yaml
 
 from rich.console import Console
 from rich.panel import Panel
@@ -833,6 +834,56 @@ def install_mcp(
             config_path = Path.home() / "Library" / "Application Support" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
         else:
             config_path = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
+
+    if client.lower() in ("deepseek", "dsh", "deepseek-harness"):
+        config_path = Path.home() / ".config" / "deepseek-harness" / "profiles" / "default.yaml"
+        dsh_plugin_entry = {
+            "id": "mcp-tacit",
+            "name": "@deepseek-ai/dsh-mcp-client",
+            "config": {
+                "serverName": "tacit",
+                "transport": "stdio",
+                "command": "tacit",
+                "args": ["mcp"],
+                "failOnStartupError": False
+            }
+        }
+
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+            if config_path.exists():
+                try:
+                    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    data = {}
+
+            if "plugins" not in data or not isinstance(data["plugins"], list):
+                data["plugins"] = []
+
+            # Remove existing tacit plugin entry if present
+            data["plugins"] = [
+                p for p in data["plugins"]
+                if not (isinstance(p, dict) and p.get("id") == "mcp-tacit")
+            ]
+            
+            # Append updated entry
+            data["plugins"].append(dsh_plugin_entry)
+
+            config_path.write_text(yaml.dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
+
+            console.print(Panel.fit(
+                f"[bold green]MCP Server Configured Successfully[/bold green]\n"
+                f"[dim]Client:[/dim]  DeepSeek Harness\n"
+                f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
+                f"[cyan]The 'tacit mcp' plugin is now registered in your default DeepSeek profile.[/cyan]",
+                border_style="green",
+            ))
+        except Exception as e:
+            console.print(f"[red]Failed to write DeepSeek Harness config: {e}[/red]")
+            console.print("[yellow]You can manually add this plugin block to your dsh YAML profile:[/yellow]")
+            console.print(yaml.dump({"plugins": [dsh_plugin_entry]}, sort_keys=False))
+        return
     else:
         console.print(f"[red]Unknown client '{client}'. Supported options: antigravity, agy, claude, claude-code, cursor, print.[/red]")
         return
