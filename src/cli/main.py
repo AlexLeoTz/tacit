@@ -305,14 +305,38 @@ def search(
     ),
 ):
     """Search stored memories using hybrid BM25 / dense vector search with RRF fusion."""
+    from ..search.embeddings import EmbeddingService
+    from ..utils.scope import resolve_scope_hints
+
     storage = get_storage(project)
-    scope_list = [s.strip() for s in scope.split(",") if s.strip()] if scope else None
+    scope_list = (
+        resolve_scope_hints(
+            [s for s in scope.split(",") if s.strip()],
+            project_root=Config.find_project_root(project),
+        )
+        if scope
+        else resolve_scope_hints(None, project_root=Config.find_project_root(project))
+    )
+    if scope_list:
+        console.print(f"[dim]Scope:[/dim] {', '.join(scope_list)}")
+
+    embed_svc = EmbeddingService.get()
+    if mode == "hybrid" and not embed_svc.available:
+        # Say so rather than silently returning keyword-only results that look
+        # like a complete answer.
+        console.print(Panel.fit(
+            "[yellow]Semantic search is unavailable — these are keyword-only results.[/yellow]\n"
+            f"[dim]{embed_svc.describe()}[/dim]\n\n"
+            "Prepare the offline model with [bold cyan]tacit reindex[/bold cyan], "
+            "or set [bold cyan]OPENAI_API_KEY[/bold cyan] / [bold cyan]GEMINI_API_KEY[/bold cyan].",
+            border_style="yellow",
+        ))
 
     results = storage.search_hybrid(
         query=query,
         limit=limit,
         mode=mode,
-        scope_hint=scope_list,
+        scope_hint=scope_list or None,
         memory_type=type,
         include_superseded=all_status,
         debug=debug,
@@ -376,7 +400,15 @@ def reindex(
 
     storage = get_storage(project)
     embed_svc = EmbeddingService.get()
+
+    if not embed_svc.available:
+        # Downloading the model is an explicit maintenance action; a search query
+        # must never block on it.
+        console.print("[dim]Preparing the local ONNX model (first run downloads ~50MB)...[/dim]")
+        embed_svc.ensure_local_model(allow_download=True)
+
     console.print(f"[dim]Embedding provider:[/dim] {embed_svc.describe()}")
+    console.print(f"[dim]Model cache:[/dim] {embed_svc.cache_dir}")
 
     if not embed_svc.available:
         console.print(
@@ -384,7 +416,8 @@ def reindex(
                 "[bold red]No embedding provider available[/bold red]\n\n"
                 "Semantic search is disabled; queries fall back to keyword matching only.\n\n"
                 "Set [bold cyan]OPENAI_API_KEY[/bold cyan] or [bold cyan]GEMINI_API_KEY[/bold cyan], "
-                "or install the offline model with [bold]pip install fastembed[/bold].",
+                "or install the offline model with [bold]pip install fastembed[/bold].\n"
+                "Set [bold cyan]TACIT_EMBED_CACHE[/bold cyan] if the cache directory is not writable.",
                 border_style="red",
             )
         )
@@ -1043,9 +1076,20 @@ def mcp(
     transport: str = typer.Option(
         "stdio", "--transport", "-t", help="MCP transport mode (stdio)"
     ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Workspace this server serves (defaults to the launch directory)"
+    ),
 ):
     """Run Model Context Protocol (MCP) server for AI coding agents."""
-    server = MemoryMCPServer()
+    # Pin the workspace once, at startup. Resolving it from the process CWD on
+    # every call lets a client that changes directory answer from the wrong
+    # project's database partway through a session.
+    pinned_root = Config.find_project_root(project)
+    Config.ensure_directories(pinned_root)
+    # Never print to stdout here: stdio transport carries JSON-RPC on stdout and
+    # any stray write corrupts the protocol stream.
+    Console(stderr=True).print(f"[dim]Tacit MCP serving workspace:[/dim] {pinned_root.resolve()}")
+    server = MemoryMCPServer(project_root=pinned_root)
     server.run(transport=transport)
 
 

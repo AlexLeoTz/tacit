@@ -1,6 +1,7 @@
 """MCP Server implementation for Tacit using FastMCP with Multi-Project Support."""
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..core.storage import MemoryStorage
@@ -24,12 +25,15 @@ _ADD_MEMORY_DESCRIPTION = (
 )
 
 
-def create_mcp_server(storage: Optional[MemoryStorage] = None):
+def create_mcp_server(
+    storage: Optional[MemoryStorage] = None,
+    project_root: Optional["Path"] = None,
+):
     """Factory creating a configured FastMCP server instance supporting multiple projects."""
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("tacit")
-    handlers = MemoryMCPHandlers(storage)
+    handlers = MemoryMCPHandlers(storage, project_root=project_root)
 
     @mcp.tool(description=_ADD_MEMORY_DESCRIPTION)
     def memory_add(
@@ -197,9 +201,13 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
 class MemoryMCPServer:
     """Wrapper for running FastMCP server."""
 
-    def __init__(self, storage: Optional[MemoryStorage] = None):
+    def __init__(
+        self,
+        storage: Optional[MemoryStorage] = None,
+        project_root: Optional[Path] = None,
+    ):
         self.storage = storage
-        self.mcp = create_mcp_server(storage)
+        self.mcp = create_mcp_server(storage, project_root=project_root)
 
     def run(self, transport: str = "stdio") -> None:
         """Run the FastMCP server."""

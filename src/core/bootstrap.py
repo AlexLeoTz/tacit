@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from .authority import compute_authority
 from .memory_node import MemoryNode
 from ..utils.config import Config
+from ..utils.scope import scope_matches
 
 
 # ==============================================================================
@@ -394,9 +395,7 @@ class BootstrapEngine:
                 neighbor_map=neighbor_map,
             )
             score_val = cls.score(features, node.type)
-            if hints and any(
-                hint in str(path).lower() for path in (node.scope or []) for hint in hints
-            ):
+            if hints and scope_matches(node.scope or [], hints):
                 score_val *= 1.0 + SCOPE_BOOST
             # Drop negatively scored nodes (actively misleading)
             if score_val >= 0.0:

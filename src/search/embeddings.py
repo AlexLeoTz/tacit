@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 import os
 import threading
+from pathlib import Path
+import sys
 from typing import Optional, Sequence
 import urllib.request
 
@@ -62,6 +64,63 @@ def _local_model() -> str:
     return os.environ.get("TACIT_EMBED_MODEL", LOCAL_MODEL)
 
 
+def user_cache_dir() -> Path:
+    """Persistent per-user cache location for downloaded models."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(Path.home(), "AppData", "Local")
+        return Path(base) / "tacit" / "models"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tacit" / "models"
+
+
+def _is_writable_dir(path: Path) -> bool:
+    """True when we can actually create files in ``path``."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".tacit_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def resolve_cache_dir(project_root: Optional[Path] = None) -> Path:
+    """Pick a persistent, writable directory for the ONNX model.
+
+    fastembed's own default is the OS temp directory, which is a poor choice for
+    a ~50 MB download: it can vanish between runs, and sandboxes frequently deny
+    writes there — the failure surfaced as a multi-second retry storm ending in
+    ``Permission denied`` and a search timeout.
+
+    Order: explicit override, then the per-user cache, then ``.tacit/models``
+    inside the project (the only location guaranteed writable inside a
+    workspace-restricted sandbox).
+    """
+    override = os.environ.get("TACIT_EMBED_CACHE") or os.environ.get("FASTEMBED_CACHE_PATH")
+    if override:
+        candidate = Path(override).expanduser()
+        if _is_writable_dir(candidate):
+            return candidate
+        return candidate
+
+    if project_root is None:
+        try:
+            from ..utils.config import Config
+
+            project_root = Config.find_project_root()
+        except Exception:
+            project_root = None
+
+    candidates = [user_cache_dir()]
+    if project_root is not None:
+        candidates.append(Path(project_root) / ".tacit" / "models")
+
+    for candidate in candidates:
+        if _is_writable_dir(candidate):
+            return candidate
+    return candidates[-1]
+
+
 class EmbeddingUnavailable(RuntimeError):
     """Raised when the resolved embedding provider cannot serve a request."""
 
@@ -72,11 +131,13 @@ class EmbeddingService:
     _instance: Optional["EmbeddingService"] = None
     _lock = threading.Lock()
 
-    def __init__(self) -> None:
+    def __init__(self, project_root: Optional[Path] = None) -> None:
         self._model = None
         self._failed = False
         self._load_lock = threading.Lock()
-        self._provider: Optional[str] = None
+        self._cache_dir: Optional[Path] = None
+        self._last_error = ""
+        self._project_root = project_root
         self._openai_api_key = os.environ.get("OPENAI_API_KEY")
         self._gemini_api_key = os.environ.get("GEMINI_API_KEY")
 
@@ -103,18 +164,20 @@ class EmbeddingService:
     def _gemini_key(self) -> Optional[str]:
         return os.environ.get("GEMINI_API_KEY") or self._gemini_api_key
 
-    def _resolve_provider(self) -> str:
-        """Resolve and cache the provider: OpenAI, then Gemini, then local ONNX."""
-        if self._provider is not None:
-            return self._provider
+    def _resolve_provider(self, allow_download: bool = False) -> str:
+        """Resolve the provider: OpenAI, then Gemini, then local ONNX.
+
+        ``allow_download=False`` (the default, used by every read path) only
+        accepts a model that is already on disk. A search query must never block
+        on a 50 MB download: fetching a model is an explicit action, performed by
+        ``tacit reindex``.
+        """
         if self._openai_key():
-            self._provider = "openai"
-        elif self._gemini_key():
-            self._provider = "gemini"
-        else:
-            self._load()
-            self._provider = "local" if self._model is not None else "none"
-        return self._provider
+            return "openai"
+        if self._gemini_key():
+            return "gemini"
+        self._load(allow_download=allow_download)
+        return "local" if self._model is not None else "none"
 
     @property
     def provider(self) -> str:
@@ -123,7 +186,19 @@ class EmbeddingService:
 
     @property
     def available(self) -> bool:
+        """True when a provider can serve a query *right now*, without downloading."""
         return self._resolve_provider() != "none"
+
+    @property
+    def cache_dir(self) -> Path:
+        if self._cache_dir is None:
+            self._cache_dir = resolve_cache_dir(self._project_root)
+        return self._cache_dir
+
+    @property
+    def last_error(self) -> str:
+        """Why the local model could not be used, for user-facing messages."""
+        return self._last_error
 
     @property
     def dimension(self) -> int:
@@ -144,8 +219,23 @@ class EmbeddingService:
     def describe(self) -> str:
         provider = self._resolve_provider()
         if provider == "none":
-            return "unavailable (no OPENAI_API_KEY, no GEMINI_API_KEY, no local ONNX model)"
+            detail = f" ({self._last_error})" if self._last_error else ""
+            return (
+                "unavailable (no OPENAI_API_KEY, no GEMINI_API_KEY, and no local ONNX "
+                f"model cached in {self.cache_dir}){detail}"
+            )
         return f"{provider}:{self.model_id} ({self.dimension}d)"
+
+    def ensure_local_model(self, allow_download: bool = True) -> bool:
+        """Prepare the local ONNX model, downloading it if permitted.
+
+        Only called from explicit maintenance commands (``tacit reindex``), never
+        from a query.
+        """
+        if self._openai_key() or self._gemini_key():
+            return False
+        self._load(allow_download=allow_download)
+        return self._model is not None
 
     # -- remote providers --------------------------------------------------
 
@@ -222,23 +312,43 @@ class EmbeddingService:
 
     # -- local provider ----------------------------------------------------
 
-    def _load(self) -> None:
-        if self._model is not None or self._failed:
+    def _load(self, allow_download: bool = False) -> None:
+        """Load the local ONNX model, optionally downloading it.
+
+        ``local_files_only=True`` when downloads are not allowed makes a missing
+        model fail in milliseconds instead of retrying the download three times
+        with backoff — the retry storm that made `tacit search` appear to hang.
+        """
+        if self._model is not None:
+            return
+        if self._failed and not allow_download:
             return
         with self._load_lock:
-            if self._model is not None or self._failed:
+            if self._model is not None:
+                return
+            if self._failed and not allow_download:
                 return
             try:
                 from fastembed import TextEmbedding
 
-                self._model = TextEmbedding(_local_model())
-            except Exception:
+                self._model = TextEmbedding(
+                    _local_model(),
+                    cache_dir=str(self.cache_dir),
+                    local_files_only=not allow_download,
+                )
+                self._failed = False
+                self._last_error = ""
+            except Exception as exc:
                 self._failed = True
+                self._last_error = f"{type(exc).__name__}: {exc}"[:200]
 
     def _embed_local(self, texts: Sequence[str]) -> list[list[float]]:
         self._load()
         if self._model is None:
-            raise EmbeddingUnavailable("local ONNX embedding model is not installed")
+            raise EmbeddingUnavailable(
+                f"local ONNX embedding model is not available in {self.cache_dir}"
+                + (f" ({self._last_error})" if self._last_error else "")
+            )
         out: list[list[float]] = []
         for start in range(0, len(texts), BATCH_SIZE):
             batch = texts[start:start + BATCH_SIZE]

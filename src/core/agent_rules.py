@@ -12,6 +12,11 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **Record Every Completed Task (Distilled)**: Every task that changes the codebase MUST end with a Tacit write — see the Mandatory Task Completion Protocol below. Capture design choices, undocumented workarounds (hacks), environment dependencies, operational commands, and resolved error caveats.
 * **NEVER Store Chat History, Logs, or Code Snippets**: Do not pollute the memory database with conversation transcripts, raw terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
 
+## Scope: Let Tacit Decide
+* **Do NOT construct `scope_hint` values yourself.** Absolute paths, Windows escaping and trailing separators are easy to get wrong, and a wrong path silently changes ranking. **Omit `scope_hint` entirely** — Tacit infers the active scope from the directory it runs in.
+* If you do pass one, use a **project-relative path** (`src/api`, `backend/jobs`), never an absolute path. Absolute paths outside the project are ignored.
+* When *recording* a memory, always set `scope` explicitly to the affected folders or files (e.g. `['src/api/auth.py']`). Recording is the one place a precise path is required, and those paths must exist in the codebase.
+
 ## Writing Titles (they are the search index):
 * **Every entry MUST have a `title`, and it must be specific.** Only the **title, tags and summary** are embedded into the vector index — the full `content` is not. A vague title therefore makes a memory effectively unfindable by semantic search, no matter how good the content is.
 * **Write the title as a self-contained phrase that names the subject**, not a label or a category echo:

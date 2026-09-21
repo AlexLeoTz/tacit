@@ -10,12 +10,17 @@ from ..core.storage import MemoryStorage
 from ..search.full_text import FullTextSearch
 from ..search.temporal import TemporalSearch
 from ..utils.config import Config
+from ..utils.scope import resolve_scope_hints
 
 
 class MemoryMCPHandlers:
     """Core handler logic for Tacit MCP tools supporting multiple projects."""
 
-    def __init__(self, default_storage: Optional[MemoryStorage] = None):
+    def __init__(
+        self,
+        default_storage: Optional[MemoryStorage] = None,
+        project_root: Optional[Path] = None,
+    ):
         self._storage_cache: Dict[str, MemoryStorage] = {}
         if default_storage:
             self._default_storage = default_storage
@@ -23,6 +28,20 @@ class MemoryMCPHandlers:
             self._storage_cache[str(default_storage.db_path.resolve())] = default_storage
         else:
             self._default_storage = None
+        #: Pinned once at server start. Resolving the project from the process
+        #: CWD on every call let a client that changes directory answer from a
+        #: different project's database mid-session.
+        self._project_root = Path(project_root).resolve() if project_root else None
+
+    @property
+    def project_root(self) -> Path:
+        """The project this handler serves, resolved once and then stable."""
+        if self._project_root is None:
+            try:
+                self._project_root = Config.find_project_root()
+            except Exception:
+                self._project_root = Path.cwd()
+        return self._project_root
 
     def _resolve_storage(self, project: Optional[str] = None) -> MemoryStorage:
         """Resolve or initialize SQLite storage for a given project path or active workspace."""
@@ -39,7 +58,9 @@ class MemoryMCPHandlers:
         elif self._default_storage:
             return self._default_storage
         else:
-            project_root = Config.find_project_root()
+            # No explicit project: use the pinned workspace rather than whatever
+            # the CWD happens to be at call time.
+            project_root = self.project_root
 
         key = str(project_root.resolve())
         if self._default_storage and self._default_storage.db_path.parent == project_root:
@@ -308,6 +329,9 @@ class MemoryMCPHandlers:
     ) -> Dict[str, Any]:
         """Search memories via hybrid FTS5/dense vector engine with RRF fusion."""
         storage = self._resolve_storage(project)
+        # Sanitise whatever the agent passed: absolute paths outside this project
+        # are dropped, and with no usable hint the active directory is inferred.
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self.project_root)
         results = storage.search_hybrid(
             query=query,
             limit=limit,
@@ -499,6 +523,7 @@ Merkle Root: {node.merkle_root}
         """Aggregate relevance-ranked, token-budgeted institutional briefing for agent session bootstrap."""
         from ..core.bootstrap import BootstrapEngine
         storage = self._resolve_storage(project)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self.project_root)
         briefing_res = BootstrapEngine.generate_briefing(
             storage=storage,
             budget=budget if budget is not None else Config.TOKEN_BUDGET,

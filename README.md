@@ -422,6 +422,8 @@ An editable install (`pip install -e .`) stays pinned to the directory it was in
 | `TACIT_OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model to use. |
 | `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
 | `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local FastEmbed ONNX embedding model (used only when no API key is set). |
+| `TACIT_EMBED_CACHE` | per-user cache dir | Where the downloaded ONNX model is stored. Set this when the default cache is not writable (sandboxes, containers); Tacit otherwise falls back to `<project>/.tacit/models` automatically. |
+| `TACIT_PROJECT` | CWD | Default project path, overriding CWD-based discovery. |
 | `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
 | `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
 | `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |

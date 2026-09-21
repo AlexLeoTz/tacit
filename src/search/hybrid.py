@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .embeddings import EmbeddingService
 from .vectordb import deserialize_f32, normalize, serialize_f32
+from ..utils.scope import scope_matches
 
 RRF_K = 60
 RETRIEVE_K = 50
@@ -261,8 +262,11 @@ def apply_boosts(
 
         # Multiplicative scope boost
         if scope_hint and scope_json:
-            clean_scope = scope_json.lower()
-            if any(h.lower() in clean_scope for h in scope_hint if h.strip()):
+            try:
+                node_scope = json.loads(scope_json)
+            except (TypeError, ValueError):
+                node_scope = []
+            if scope_matches(node_scope if isinstance(node_scope, list) else [], scope_hint):
                 mult *= (1.0 + SCOPE_BOOST)
 
         # Gentle recency half-life decay (90 days)

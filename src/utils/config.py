@@ -56,6 +56,16 @@ class Config:
         """Discover project root by walking upwards on auto-discovery, or using explicit path/name when provided."""
         current = Path.cwd().resolve()
 
+        if not start_path:
+            # TACIT_PROJECT pins the workspace deterministically, which matters for
+            # long-lived MCP servers whose client may change the process CWD.
+            pinned = os.environ.get("TACIT_PROJECT", "").strip()
+            if pinned:
+                candidate = Path(pinned).expanduser()
+                if candidate.exists():
+                    return candidate.parent if candidate.is_file() else candidate.resolve()
+                # A bad value must not break discovery; fall through instead.
+
         if start_path:
             # If start_path is a Path object or already an existing filesystem directory/file
             p = Path(start_path)

@@ -34,7 +34,7 @@ def clean_provider(monkeypatch):
 @pytest.fixture
 def no_local_model(monkeypatch):
     """Pretend fastembed is not installed, so tests never download a model."""
-    monkeypatch.setattr(EmbeddingService, "_load", lambda self: None)
+    monkeypatch.setattr(EmbeddingService, "_load", lambda self, allow_download=False: None)
     monkeypatch.setattr(EmbeddingService, "_embed_local", _fail_local)
 
 
@@ -89,7 +89,10 @@ def test_local_onnx_is_the_zero_config_fallback(monkeypatch):
                     return [0.1] * LOCAL_DIM
             return [V() for _ in batch]
 
-    monkeypatch.setattr(EmbeddingService, "_load", lambda self: setattr(self, "_model", FakeModel()))
+    monkeypatch.setattr(
+        EmbeddingService, "_load",
+        lambda self, allow_download=False: setattr(self, "_model", FakeModel()),
+    )
 
     service = EmbeddingService.get()
 
@@ -225,7 +228,10 @@ def test_local_query_embedding_uses_the_bge_prefix(monkeypatch):
                     return [0.0] * LOCAL_DIM
             return [V() for _ in batch]
 
-    monkeypatch.setattr(EmbeddingService, "_load", lambda self: setattr(self, "_model", FakeModel()))
+    monkeypatch.setattr(
+        EmbeddingService, "_load",
+        lambda self, allow_download=False: setattr(self, "_model", FakeModel()),
+    )
     monkeypatch.setattr(EmbeddingService, "_embed_local", lambda self, texts: (
         seen.update(batch=list(texts)) or [[0.0] * LOCAL_DIM for _ in texts]
     ))

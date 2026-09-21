@@ -139,7 +139,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope_hint": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Active file paths or module paths to prioritize relevance via scope boosting.",
+                    "description": "Optional. Project-relative paths you are working on (e.g. 'src/api'). Omit it and Tacit uses your active directory. Absolute paths outside the project are ignored.",
                 },
                 "include_superseded": {
                     "type": "boolean",
@@ -202,7 +202,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope_hint": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "File paths or modules currently being worked on; matching memories are boosted.",
+                    "description": "Optional. Project-relative paths you are working on; matching memories are boosted. Omit it and Tacit infers the scope from your active directory.",
                 },
                 "timeframe": {
                     "type": "string",
