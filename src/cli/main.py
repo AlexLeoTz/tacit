@@ -933,11 +933,26 @@ def update(
 
     console.print("[cyan]Updating Tacit globally...[/cyan]")
     pip_target = f"git+{git_url}"
+    current_sys = platform.system().lower()
 
     # On Windows, running tacit.exe processes lock python executable scripts and .exe wrappers.
     # Automatically terminate any background tacit serve/mcp instances (except current PID) so pip won't get PermissionError
     if platform.system().lower() == "windows":
         current_pid = os.getpid()
+    # ------------------------------------------------------------------
+    # Windows: We cannot overwrite tacit.exe while it is running.
+    # Strategy: write a .bat updater, launch it DETACHED (so it outlives
+    # this process), then exit immediately so the file lock is released.
+    # ------------------------------------------------------------------
+    if current_sys == "windows":
+        import tempfile
+
+        python_exe = sys.executable.replace("\\", "\\\\")
+        pip_target_escaped = pip_target.replace("\\", "\\\\")
+
+        # Clean up corrupt ~* dist-info dirs that block reinstalls
+        # (these are left behind by previously interrupted pip installs)
+        site_packages = None
         try:
             # Terminate background tacit.exe instances
             subprocess.run(
@@ -946,15 +961,92 @@ def update(
                 check=False,
             )
             time.sleep(0.5)
+            import sysconfig
+            site_packages = sysconfig.get_path("purelib").replace("\\", "\\\\")
         except Exception:
             pass
 
+        cleanup_lines = ""
+        if site_packages:
+            cleanup_lines = (
+                f'for /D %%d in ("{site_packages}\\~*") do rmdir /S /Q "%%d"\r\n'
+            )
+
+        bat_lines = [
+            "@echo off",
+            "echo Tacit updater running in background...",
+            "timeout /T 2 /NOBREAK > nul",  # wait for parent tacit.exe to exit
+            cleanup_lines.strip(),           # remove corrupt ~* dirs
+            f'"{python_exe}" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps "{pip_target_escaped}"',
+            "if %ERRORLEVEL% NEQ 0 (",
+            f'    echo [WARN] pip install failed, retrying with --user flag...',
+            f'    "{python_exe}" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps --user "{pip_target_escaped}"',
+            ")",
+            f'"{python_exe}" -m src.cli.main init --force 2>nul || tacit init --force 2>nul',
+            "echo Tacit update complete.",
+        ]
+        bat_content = "\r\n".join(l for l in bat_lines if l.strip()) + "\r\n"
+
+        try:
+            fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="tacit_update_")
+            os.close(fd)
+            with open(bat_path, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            # DETACHED_PROCESS (0x08) + CREATE_NO_WINDOW (0x08000000)
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.Popen(
+                ["cmd.exe", "/C", bat_path],
+                creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                close_fds=True,
+            )
+        except Exception as e:
+            console.print(f"[red]Failed to launch background updater: {e}[/red]")
+            console.print("[yellow]Manual fix:[/yellow]")
+            console.print(f"  1. Close all tacit.exe processes")
+            console.print(f"  2. Run: pip install --upgrade --force-reinstall --no-cache-dir --no-deps {pip_target}")
+            return
+
+        console.print(Panel.fit(
+            "[bold green]Tacit Update Launched![/bold green]\n"
+            "[cyan]A background updater is now running.[/cyan]\n\n"
+            "[dim]It will install the latest version from GitHub and refresh workspace rules.[/dim]\n"
+            "[dim]You can reopen your terminal in ~10 seconds and run `tacit --version` to confirm.[/dim]",
+            border_style="green",
+        ))
+        # Exit the current process so tacit.exe releases its file lock
+        raise typer.Exit(code=0)
+
+    # ------------------------------------------------------------------
+    # Unix / macOS: safe to run pip directly in the same process.
+    # Kill other background tacit instances first to avoid conflicts.
+    # ------------------------------------------------------------------
+    current_pid = os.getpid()
+    try:
+        subprocess.run(
+            ["pkill", "-f", "tacit"],
+            capture_output=True,
+            check=False,
+        )
+        time.sleep(0.3)
+    except Exception:
+        pass
+
     current_root = Config.find_project_root()
     is_local_dev = (current_root / "setup.py").exists() and (current_root / ".git").exists()
+    # Only treat as local-dev if the env var is explicitly set, preventing
+    # accidental editable-mode installs when running from inside the repo.
+    is_local_dev = (
+        os.environ.get("TACIT_DEV_MODE", "").lower() in ("1", "true", "yes")
+        and (current_root / "setup.py").exists()
+        and (current_root / ".git").exists()
+    )
 
     try:
         if is_local_dev:
             console.print("[yellow]Local development clone detected. Upgrading via git pull and editable install...[/yellow]")
+            console.print("[yellow]Local dev mode detected. Running git pull + editable install...[/yellow]")
             try:
                 git_pull = subprocess.run(["git", "pull"], cwd=current_root, capture_output=True, text=True, check=False)
                 if git_pull.returncode != 0:
@@ -974,12 +1066,15 @@ def update(
             if is_local_dev or (current_root / "setup.py").exists():
                 console.print("[yellow]Retrying upgrade via editable mode...[/yellow]")
                 result = subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."], cwd=current_root, capture_output=True, text=True, check=False)
+            console.print(f"[red]Update failed: {result.stderr}[/red]")
+            return
 
             if result.returncode != 0:
                 console.print(f"[red]Update failed: {result.stderr}[/red]")
                 return
 
         # Refresh rules in current workspace using a fresh process of the newly updated code
+        # Refresh rules in current workspace
         console.print("[cyan]Refreshing local workspace agent rules...[/cyan]")
         try:
             subprocess.run([sys.executable, "-m", "src.cli.main", "init", "--force"], check=False)
