@@ -253,12 +253,14 @@ class BootstrapEngine:
         age_str = f"{age_days}d old" if age_days > 0 else "today"
 
         lines = [
-            f"◆ {node.type.upper()} · {node.impact.capitalize()} impact · {age_str} · score {scored.score:.2f} (`{node.id[:8]}`)",
+            f"◆ {node.type.upper()} · {node.impact.capitalize()} impact · {age_str} · score {scored.score:.2f} (`{node.id}`)",
             f'  "{node.title or node.summary}"',
             f"  {node.content.strip()}",
         ]
         if node.parents:
-            parent_refs = ", ".join(f"`{p[:8]}`" for p in node.parents)
+            # Full ids: `memory_get` requires the complete UUID, so a truncated
+            # one here is a reference the reader cannot follow.
+            parent_refs = ", ".join(f"`{p}`" for p in node.parents)
             lines.append(f"  ↳ built on: {parent_refs}")
         return "\n".join(lines)
 
@@ -267,7 +269,7 @@ class BootstrapEngine:
         """Render concise one-line summary for Tier 2 entry."""
         node = scored.node
         title_or_summary = node.title or node.summary
-        return f"  {dominant_tag(node):<12} • {title_or_summary} (`{node.id[:8]}`)"
+        return f"  {dominant_tag(node):<12} • {title_or_summary} (`{node.id}`)"
 
     @classmethod
     def assemble(

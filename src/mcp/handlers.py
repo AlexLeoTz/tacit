@@ -121,7 +121,7 @@ class MemoryMCPHandlers:
                     top_node = top_cand["node"]
                     parents = [top_node.id]
                     reasons_str = ", ".join(top_cand["reasons"])
-                    linked_hint = f" (Auto-linked to parent: '{top_node.title or top_node.summary}' [`{top_node.id[:8]}`] via {reasons_str})"
+                    linked_hint = f" (Auto-linked to parent: '{top_node.title or top_node.summary}' [`{top_node.id}`] via {reasons_str})"
                 else:
                     # Provide interactive warning with suggested parent candidates and memory_link instructions
                     suggested_candidates = candidates
@@ -129,7 +129,9 @@ class MemoryMCPHandlers:
                     for c in candidates:
                         cn = c["node"]
                         reasons_str = ", ".join(c["reasons"])
-                        cand_lines.append(f"  • [`{cn.id[:8]}`] ({cn.type}) \"{cn.title or cn.summary}\" (affinity: {c['score']:.2f}, {reasons_str})")
+                        # Full UUIDs: the notice asks the agent to call
+                        # memory_link, which will not accept a prefix.
+                        cand_lines.append(f"  • [`{cn.id}`] ({cn.type}) \"{cn.title or cn.summary}\" (affinity: {c['score']:.2f}, {reasons_str})")
                     
                     warning_msg = (
                         f"\n\n[TACIT GRAPH NOTICE]: This entry was created as an isolated ORPHAN node (no `parents` provided).\n"
@@ -426,14 +428,14 @@ class MemoryMCPHandlers:
         if ancestors:
             ancestry_tree_lines.append("CAUSAL ANCESTORS (Foundations):")
             for a in sorted(ancestors, key=lambda x: x.timestamp):
-                ancestry_tree_lines.append(f"  └── [{a.type}] {a.title or a.summary} (`{a.id[:8]}`)")
+                ancestry_tree_lines.append(f"  └── [{a.type}] {a.title or a.summary} (`{a.id}`)")
         else:
             ancestry_tree_lines.append("CAUSAL ANCESTORS: None (Root Decision)")
 
         if descendants:
             ancestry_tree_lines.append("\nCAUSAL DESCENDANTS (Derived):")
             for d in sorted(descendants, key=lambda x: x.timestamp):
-                ancestry_tree_lines.append(f"  └── [{d.type}] {d.title or d.summary} (`{d.id[:8]}`)")
+                ancestry_tree_lines.append(f"  └── [{d.type}] {d.title or d.summary} (`{d.id}`)")
         else:
             ancestry_tree_lines.append("CAUSAL DESCENDANTS: None")
 
@@ -451,7 +453,7 @@ class MemoryMCPHandlers:
                 succ_node = storage.get_memory(succ_id)
                 succ_title = f' "{succ_node.title or succ_node.summary}"' if succ_node else ""
                 reason_str = f': "{succ.get("reason")}"' if succ.get("reason") else ""
-                status_banner = f"\n⚠️ SUPERSEDED by {succ_id[:8]}{succ_title}{reason_str}\n(This entry is kept for historical lineage; do NOT treat as active guidance.)\n"
+                status_banner = f"\n⚠️ SUPERSEDED by {succ_id}{succ_title}{reason_str}\n(This entry is kept for historical lineage; do NOT treat as active guidance.)\n"
             else:
                 status_banner = "\n⚠️ SUPERSEDED: This decision has been superseded by a newer entry.\n"
         elif node.status == "retracted":

@@ -36,6 +36,7 @@ import signal
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -730,7 +731,7 @@ def launch_detached_windows_updater(spec: Dict[str, Any]) -> Path:
 
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
-    subprocess.Popen(
+    process = subprocess.Popen(
         [spec["python"], str(runner), str(spec_path)],
         creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
         stdin=subprocess.DEVNULL,
@@ -738,7 +739,115 @@ def launch_detached_windows_updater(spec: Dict[str, Any]) -> Path:
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
+    # Record that a run is live so a second `tacit update` can wait for this one
+    # instead of starting a competing pip install.
+    write_running_status(process.pid, spec)
     return runner
+
+
+def write_running_status(pid: int, spec: Dict[str, Any], path: Optional[Path] = None) -> None:
+    """Mark an update as in progress. Written without a ``finished_at``."""
+    payload = {
+        "running": True,
+        "pid": int(pid),
+        "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "heartbeat": time.time(),
+        "mode": "editable" if spec.get("editable") else "global",
+        "target": spec.get("target"),
+        "reported": False,
+    }
+    target = path or Path(spec.get("status") or update_status_path())
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+#: A run whose heartbeat is older than this is treated as dead.
+HEARTBEAT_STALE_SECONDS = 60.0
+
+
+def _start_heartbeat(status_path: Path, stop_event: threading.Event) -> threading.Thread:
+    """Refresh the status file while the updater runs.
+
+    Process enumeration is not always available (`tasklist` can be blocked by
+    policy or a sandbox), so liveness cannot rest on the PID alone. The
+    heartbeat is written from a thread because the main thread spends its time
+    blocked inside pip.
+    """
+    def beat() -> None:
+        while not stop_event.wait(5.0):
+            status = read_status(status_path)
+            if not status or not status.get("running"):
+                return
+            status["heartbeat"] = time.time()
+            try:
+                status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
+            except OSError:
+                return
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    return thread
+
+
+def update_in_progress(status: Optional[Dict[str, Any]] = None) -> bool:
+    """True when a previously launched updater is still running.
+
+    Guards against the confusing case the user hits: run `tacit update`, see it
+    return immediately, run it again — which used to start a second pip install
+    on top of the first.
+    """
+    status = status if status is not None else read_status()
+    if not status or not status.get("running"):
+        return False
+
+    pid = int(status.get("pid") or 0)
+    if pid and process_is_alive(pid):
+        return True
+
+    # Fall back to the heartbeat: `tasklist` may be denied, which would
+    # otherwise look identical to "the updater died".
+    heartbeat = status.get("heartbeat")
+    if isinstance(heartbeat, (int, float)):
+        return (time.time() - heartbeat) < HEARTBEAT_STALE_SECONDS
+    return False
+
+
+def wait_for_update(timeout: float = 900.0, interval: float = 1.0,
+                    path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Block until the running updater finishes, then return its final status."""
+    deadline = time.time() + max(0.0, timeout)
+    while time.time() < deadline:
+        status = read_status(path)
+        if status and not status.get("running"):
+            return status
+        time.sleep(interval)
+    return read_status(path)
+
+
+def mark_status_reported(path: Optional[Path] = None) -> None:
+    """Remember that the last result has been shown, so it is not repeated."""
+    target = path or update_status_path()
+    status = read_status(target)
+    if not status:
+        return
+    status["reported"] = True
+    try:
+        target.write_text(json.dumps(status, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def unreported_result() -> Optional[Dict[str, Any]]:
+    """The last finished update that has not been shown to the user yet."""
+    status = read_status()
+    if not status or status.get("running") or status.get("reported"):
+        return None
+    if not status.get("finished_at"):
+        return None
+    return status
 
 
 def run_windows_update(spec: Dict[str, Any]) -> int:
@@ -762,6 +871,10 @@ def run_windows_update(spec: Dict[str, Any]) -> int:
         "mode": "editable" if spec.get("editable") else "global",
         "target": spec.get("target"),
     }
+
+    status_path = Path(spec.get("status") or update_status_path())
+    stop_heartbeat = threading.Event()
+    _start_heartbeat(status_path, stop_heartbeat)
     try:
         log("=" * 60)
         log("Tacit updater started.")
@@ -836,8 +949,11 @@ def run_windows_update(spec: Dict[str, Any]) -> int:
         status["ok"] = False
         status["error"] = repr(exc)
     finally:
+        stop_heartbeat.set()
         status["duration_seconds"] = round(time.time() - started, 1)
+        status["running"] = False
+        status["reported"] = False
         log(f"Finished (ok={status.get('ok')}, version={status.get('version')}).")
-        write_status(status, Path(spec.get("status") or update_status_path()))
+        write_status(status, status_path)
         log_file.close()
     return 0 if status.get("ok") else 1

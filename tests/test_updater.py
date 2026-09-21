@@ -608,12 +608,14 @@ def test_update_launches_detached_updater_on_windows(monkeypatch, tmp_dir):
     assert captured["python"] == updater.real_python_executable()
     assert captured["package_parent"] == str(updater.package_parent_dir())
     assert captured["cwd"] == str(Path.cwd())
-    assert "update started in the background" in result.stdout
+    # The message must tell the user they do not have to re-run the command.
+    flat = " ".join(result.stdout.split())
+    assert "updating in the background" in flat
+    assert "next tacit command reports the result" in flat
 
 
 def test_update_warns_about_previous_failed_run(monkeypatch, tmp_dir):
     import platform
-
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(updater, "launch_detached_windows_updater", lambda spec: tmp_dir / "r.py")
     monkeypatch.setattr(
@@ -666,3 +668,169 @@ def test_update_uses_editable_mode_for_source_checkout(monkeypatch, tmp_dir):
     assert captured["editable"] is True
     assert captured["source_root"] == str(Path("/src/tacit"))
     assert captured["target"] == str(Path("/src/tacit"))
+
+
+# ---------------------------------------------------------------------------
+# The user should never have to run `tacit update` twice to learn the outcome
+# ---------------------------------------------------------------------------
+
+def test_update_in_progress_requires_a_live_process(monkeypatch):
+    monkeypatch.setattr(updater, "process_is_alive", lambda pid: True)
+    assert updater.update_in_progress({"running": True, "pid": 999999}) is True
+
+    monkeypatch.setattr(updater, "process_is_alive", lambda pid: False)
+    assert updater.update_in_progress({"running": False, "pid": 1}) is False
+    monkeypatch.setattr(updater, "read_status", lambda path=None: None)
+    assert updater.update_in_progress(None) is False
+
+
+def test_update_in_progress_falls_back_to_the_heartbeat(monkeypatch):
+    """`tasklist` can be denied by policy, which must not look like 'it died'."""
+    monkeypatch.setattr(updater, "process_is_alive", lambda pid: False)
+
+    fresh = {"running": True, "pid": 999999, "heartbeat": updater.time.time()}
+    assert updater.update_in_progress(fresh) is True
+
+    stale = {
+        "running": True, "pid": 999999,
+        "heartbeat": updater.time.time() - updater.HEARTBEAT_STALE_SECONDS - 1,
+    }
+    assert updater.update_in_progress(stale) is False, "a dead run must not block a new one"
+
+
+def test_running_status_carries_a_heartbeat(tmp_dir):
+    status_path = tmp_dir / "status.json"
+
+    updater.write_running_status(4242, {"target": "git+x"}, path=status_path)
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    assert payload["running"] is True
+    assert payload["pid"] == 4242
+    assert isinstance(payload["heartbeat"], float)
+    assert "finished_at" not in payload, "a live run has not finished"
+
+
+def test_unreported_result_needs_a_finished_unreported_run(monkeypatch):
+    cases = [
+        (None, False),
+        ({"running": True, "finished_at": "x"}, False),
+        ({"ok": True}, False),
+        ({"ok": True, "finished_at": "x", "reported": True}, False),
+        ({"ok": True, "finished_at": "x", "reported": False}, True),
+    ]
+    for status, expected in cases:
+        monkeypatch.setattr(updater, "read_status", lambda path=None, s=status: s)
+        assert (updater.unreported_result() is not None) is expected, status
+
+
+def test_second_update_waits_instead_of_launching_a_second(monkeypatch, tmp_dir):
+    """Re-running used to start a competing pip install; now it waits and reports."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    launched = []
+    monkeypatch.setattr(
+        updater, "launch_detached_windows_updater", lambda spec: launched.append(spec)
+    )
+    monkeypatch.setattr(
+        updater, "read_status",
+        lambda path=None: {"running": True, "pid": os.getpid(), "started_at": "2026-09-21 22:00:00", "heartbeat": updater.time.time()},
+    )
+    monkeypatch.setattr(
+        updater, "wait_for_update",
+        lambda *a, **k: {"ok": True, "version": "0.1.7", "running": False},
+    )
+    monkeypatch.setattr(updater, "mark_status_reported", lambda path=None: None)
+
+    result = CliRunner().invoke(app, ["update"])
+
+    flat = " ".join(result.stdout.split())
+    assert result.exit_code == 0
+    assert "An update is already running" in flat
+    assert "successfully updated" in flat
+    assert "0.1.7" in flat
+    assert launched == [], "a second updater must never be started"
+
+
+def test_second_update_reports_a_failure_and_exits_nonzero(monkeypatch, tmp_dir):
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(updater, "launch_detached_windows_updater", lambda spec: tmp_dir / "r.py")
+    monkeypatch.setattr(
+        updater, "read_status",
+        lambda path=None: {"running": True, "pid": os.getpid(), "started_at": "now", "heartbeat": updater.time.time()},
+    )
+    monkeypatch.setattr(
+        updater, "wait_for_update",
+        lambda *a, **k: {"ok": False, "error": "pip exploded", "running": False},
+    )
+    monkeypatch.setattr(updater, "mark_status_reported", lambda path=None: None)
+    monkeypatch.setattr(updater, "update_log_path", lambda: tmp_dir / "update.log")
+
+    result = CliRunner().invoke(app, ["update"])
+
+    assert result.exit_code == 1
+    assert "pip exploded" in " ".join(result.stdout.split())
+
+
+def test_the_next_command_reports_a_successful_update(monkeypatch, tmp_dir):
+    """This is what removes the 'wait, then run it again' step."""
+    from src.utils.config import Config
+
+    monkeypatch.setattr(
+        updater, "read_status",
+        lambda path=None: {
+            "ok": True, "version": "0.1.7", "finished_at": "2026-09-21 22:00:00", "reported": False,
+        },
+    )
+    marked = {"n": 0}
+    monkeypatch.setattr(
+        updater, "mark_status_reported",
+        lambda path=None: marked.__setitem__("n", marked["n"] + 1),
+    )
+    monkeypatch.setattr(Config, "check_for_updates", classmethod(lambda cls: None))
+
+    result = CliRunner().invoke(app, ["recent", "--days", "1", "--project", str(tmp_dir)])
+
+    flat = " ".join(result.stdout.split())
+    assert result.exit_code == 0
+    assert "Tacit updated to 0.1.7" in flat
+    assert marked["n"] == 1, "the result is shown once, not on every command"
+
+
+def test_the_next_command_reports_a_failed_update(monkeypatch, tmp_dir):
+    from src.utils.config import Config
+
+    monkeypatch.setattr(
+        updater, "read_status",
+        lambda path=None: {
+            "ok": False, "error": "ERROR: [WinError 32] tacit.exe",
+            "finished_at": "2026-09-21 22:00:00", "reported": False,
+        },
+    )
+    monkeypatch.setattr(updater, "mark_status_reported", lambda path=None: None)
+    monkeypatch.setattr(updater, "update_log_path", lambda: tmp_dir / "update.log")
+    monkeypatch.setattr(Config, "check_for_updates", classmethod(lambda cls: None))
+
+    result = CliRunner().invoke(app, ["recent", "--days", "1", "--project", str(tmp_dir)])
+
+    flat = " ".join(result.stdout.split())
+    assert "The last Tacit update failed" in flat
+    assert "WinError 32" in flat
+
+
+def test_a_reported_update_is_not_reported_again(monkeypatch, tmp_dir):
+    from src.utils.config import Config
+
+    monkeypatch.setattr(
+        updater, "read_status",
+        lambda path=None: {
+            "ok": True, "version": "0.1.7", "finished_at": "x", "reported": True,
+        },
+    )
+    monkeypatch.setattr(Config, "check_for_updates", classmethod(lambda cls: None))
+
+    result = CliRunner().invoke(app, ["recent", "--days", "1", "--project", str(tmp_dir)])
+
+    assert "Tacit updated to" not in result.stdout

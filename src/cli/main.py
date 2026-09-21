@@ -6,7 +6,7 @@ import platform
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 import uuid
 import yaml
 from rich.console import Console
@@ -63,6 +63,25 @@ def _esc(value: object) -> str:
     return escape(str(value))
 
 
+def _print_ids(nodes: Iterable, title: str = "Full IDs") -> None:
+    """Print complete UUIDs one per line, never inside a table.
+
+    Rich shrinks table columns to fit the terminal, which truncated the UUID to
+    something `tacit get` rejects — the exact trap this replaces. The id leads
+    the line and the label is clipped, so the UUID is always complete and
+    copy-pasteable whatever the terminal width.
+    """
+    nodes = list(nodes)
+    if not nodes:
+        return
+    console.print(f"\n[dim]{title} (pass to `tacit get`):[/dim]")
+    for node in nodes:
+        line = Text()
+        line.append(f"  {node.id}  ", style="cyan")
+        line.append(str(node.title or node.summary), style="dim")
+        console.print(line, no_wrap=True, overflow="ellipsis")
+
+
 _make_output_encoding_safe()
 
 
@@ -75,6 +94,36 @@ def _version_callback(value: bool) -> None:
         # notice that an unrelated clone is being executed instead.
         console.print(f"[dim]{updater.package_parent_dir()}[/dim]")
         raise typer.Exit()
+
+
+def _report_finished_update() -> None:
+    """Tell the user how the background updater ended — once, on the next command.
+
+    A Windows update has to run detached, which used to leave the user guessing
+    and re-running `tacit update` to find out. The result is reported here
+    instead, so the very next command closes the loop.
+    """
+    status = updater.unreported_result()
+    if not status:
+        return
+    updater.mark_status_reported()
+
+    if status.get("ok"):
+        console.print(
+            f"[green]Tacit updated to {status.get('version')}[/green] [dim]({status.get('finished_at')})[/dim]"
+        )
+        return
+
+    detail = str(status.get("error") or "see the log").strip().splitlines()
+    console.print(
+        Panel.fit(
+            "[red]The last Tacit update failed.[/red]\n"
+            f"[dim]Log:[/dim]    {updater.update_log_path()}\n"
+            f"[dim]Reason:[/dim] {detail[-1] if detail else 'see the log'}",
+            border_style="red",
+            padding=(0, 2),
+        )
+    )
 
 
 @app.callback()
@@ -92,6 +141,11 @@ def main_callback(
     """Global callback executed before any CLI command."""
     # Don't show update banner if developer is already running `tacit update` or `tacit mcp`
     if ctx.invoked_subcommand not in ("update", "mcp"):
+        try:
+            _report_finished_update()
+        except Exception:
+            pass
+
         try:
             update_info = Config.check_for_updates()
             if update_info and update_info.get("has_update"):
@@ -356,11 +410,10 @@ def search(
         header_style="bold cyan",
     )
     table.add_column("Date", style="dim", width=16)
-    table.add_column("Type", style="magenta", width=10)
+    table.add_column("Type", style="magenta", width=15)
     table.add_column("Score", style="green", width=7)
     table.add_column("Summary", style="white", min_width=25)
     table.add_column("Tags", style="cyan", width=12)
-    table.add_column("ID", style="dim", width=9)
 
     for item in results:
         node = item["node"]
@@ -378,10 +431,10 @@ def search(
             f"{score:.3f}",
             _esc(node.title or node.summary),
             _esc(tags_str),
-            node.id[:8],
         )
 
     console.print(table)
+    _print_ids(item["node"] for item in results)
 
 
 @app.command()
@@ -566,9 +619,8 @@ def grep(
         header_style="bold cyan",
     )
     table.add_column("Date", style="dim", width=16)
-    table.add_column("Type", style="magenta", width=14)
+    table.add_column("Type", style="magenta", width=18)
     table.add_column("Title / Summary", style="white", min_width=25)
-    table.add_column("ID", style="dim", width=9)
 
     for node in results:
         date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
@@ -577,10 +629,10 @@ def grep(
             date_str,
             _esc(f"[{node.type}]{status_flag}"),
             _esc(node.title or node.summary),
-            node.id[:8],
         )
 
     console.print(table)
+    _print_ids(results)
 
 
 @app.command()
@@ -612,9 +664,8 @@ def recent(
         header_style="bold blue",
     )
     table.add_column("Date", style="dim", width=18)
-    table.add_column("Type", style="magenta", width=12)
+    table.add_column("Type", style="magenta", width=15)
     table.add_column("Title / Summary", style="white")
-    table.add_column("ID", style="dim", width=10)
 
     for node in memories:
         date_str = (
@@ -626,10 +677,10 @@ def recent(
             date_str,
             _esc(f"[{node.type}]"),
             _esc(node.title or node.summary),
-            node.id[:8],
         )
 
     console.print(table)
+    _print_ids(memories)
 
 
 @app.command(name="tree")
@@ -677,14 +728,14 @@ def tree(
             if child_node:
                 branch = tree_branch.add(
                     f"[{child_node.type.lower()}][bold]{child_node.type.upper()}[/bold][/{child_node.type.lower()}] "
-                    f"[white]{child_node.title or child_node.summary}[/white] [dim]({child_node.id[:8]})[/dim]"
+                    f"[white]{child_node.title or child_node.summary}[/white] [dim]({child_node.id})[/dim]"
                 )
                 add_children(branch, cid, visited.copy())
 
     for rnode in root_nodes:
         branch = root_tree.add(
             f"[{rnode.type.lower()}][bold]{rnode.type.upper()}[/bold][/{rnode.type.lower()}] "
-            f"[white]{rnode.title or rnode.summary}[/white] [dim]({rnode.id[:8]})[/dim]"
+            f"[white]{rnode.title or rnode.summary}[/white] [dim]({rnode.id})[/dim]"
         )
         add_children(branch, rnode.id)
 
@@ -734,14 +785,14 @@ def lineage(
     ]
 
     lines = [
-        f"[bold cyan]Causal Lineage for:[/bold cyan] {_esc(target_node.title or target_node.summary)} [dim]({target_node.id[:8]})[/dim]\n"
+        f"[bold cyan]Causal Lineage for:[/bold cyan] {_esc(target_node.title or target_node.summary)} [dim]({target_node.id})[/dim]\n"
     ]
 
     if ancestors:
         lines.append("[bold yellow]Ancestors (Causal Foundations):[/bold yellow]")
         for a in sorted(ancestors, key=lambda x: x.timestamp):
             lines.append(
-                f"  └── {_esc(f'[{a.type}]')} {_esc(a.title or a.summary)} [dim]({a.id[:8]})[/dim]"
+                f"  └── {_esc(f'[{a.type}]')} {_esc(a.title or a.summary)} [dim]({a.id})[/dim]"
             )
     else:
         lines.append("[dim]No ancestor nodes (Root Decision)[/dim]")
@@ -756,7 +807,7 @@ def lineage(
         )
         for d in sorted(descendants, key=lambda x: x.timestamp):
             lines.append(
-                f"  └── {_esc(f'[{d.type}]')} {_esc(d.title or d.summary)} [dim]({d.id[:8]})[/dim]"
+                f"  └── {_esc(f'[{d.type}]')} {_esc(d.title or d.summary)} [dim]({d.id})[/dim]"
             )
     else:
         lines.append("[dim]No downstream descendants yet[/dim]")
@@ -1496,6 +1547,35 @@ def update(
     """Update Tacit to the latest version and refresh project rules in the current directory."""
     import platform
 
+    # A previous run that is still going: wait for it rather than starting a
+    # second pip install on top of it, and report how it ended.
+    running = updater.read_status()
+    if updater.update_in_progress(running):
+        console.print(
+            f"[cyan]An update is already running[/cyan] [dim](started {running.get('started_at')}).[/dim]\n"
+            "[dim]Waiting for it to finish...[/dim]"
+        )
+        finished = updater.wait_for_update()
+        updater.mark_status_reported()
+        if finished and finished.get("ok"):
+            console.print(
+                Panel.fit(
+                    "[bold green]Tacit successfully updated.[/bold green]\n"
+                    f"[dim]Version:[/dim] {finished.get('version')}",
+                    border_style="green",
+                )
+            )
+            return
+        console.print(
+            Panel.fit(
+                "[bold red]That update failed.[/bold red]\n"
+                f"[dim]Log:[/dim] {updater.update_log_path()}\n"
+                f"[dim]Reason:[/dim] {str((finished or {}).get('error') or 'see the log')[:400]}",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+
     console.print("[cyan]Updating Tacit...[/cyan]")
 
     # The update runs detached on Windows, so a failure there is otherwise silent.
@@ -1510,6 +1590,7 @@ def update(
                 border_style="yellow",
             )
         )
+        updater.mark_status_reported()
 
     foreign_checkout = updater.find_foreign_checkout(Path.cwd())
     if foreign_checkout:
@@ -1573,11 +1654,13 @@ def update(
 
         console.print(
             Panel.fit(
-                "[bold green]Tacit update started in the background.[/bold green]\n"
-                "[dim]It waits for this process to exit, stops leftover Tacit daemons,[/dim]\n"
-                "[dim]then reinstalls and refreshes your workspace rules.[/dim]\n\n"
-                f"[dim]Log:[/dim] {updater.update_log_path()}\n"
-                "[dim]Verify with:[/dim] [bold cyan]tacit --version[/bold cyan]",
+                "[bold green]Tacit is updating in the background.[/bold green]\n"
+                "[dim]It has to detach, because Windows will not let a running[/dim]\n"
+                "[dim]`tacit.exe` replace itself.[/dim]\n\n"
+                "Your [bold]next tacit command reports the result[/bold] — no need to\n"
+                "run `tacit update` again. Re-running it while this is still going\n"
+                "will simply wait for it and show the outcome.\n\n"
+                f"[dim]Log:[/dim] {updater.update_log_path()}",
                 border_style="green",
             )
         )

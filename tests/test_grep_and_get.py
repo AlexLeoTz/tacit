@@ -201,6 +201,60 @@ def test_cli_get_reports_a_missing_id(tmp_dir):
 # CLI
 # ---------------------------------------------------------------------------
 
+def test_cli_search_prints_a_uuid_that_get_accepts(tmp_dir, corpus):
+    """The reported trap: `search` printed `a1c877e7`, then `get` rejected it.
+
+    A UUID inside a table is not safe -- Rich shrinks columns to fit the
+    terminal and truncates it -- so ids are listed separately.
+    """
+    target = corpus["title_hit"]
+
+    result = CliRunner().invoke(app, ["search", "pgvector", "--project", str(tmp_dir)])
+
+    assert result.exit_code == 0
+    assert target.id in result.stdout, "the full UUID must be printed, not a prefix"
+
+    fetched = CliRunner().invoke(app, ["get", target.id, "--project", str(tmp_dir)])
+    assert fetched.exit_code == 0, "the id printed by search must be usable by get"
+
+
+def test_cli_grep_prints_a_uuid_that_get_accepts(tmp_dir, corpus):
+    target = corpus["summary_hit"]
+
+    result = CliRunner().invoke(app, ["grep", "AES-128", "--project", str(tmp_dir)])
+
+    assert result.exit_code == 0
+    assert target.id in result.stdout
+
+    fetched = CliRunner().invoke(app, ["get", target.id, "--project", str(tmp_dir)])
+    assert fetched.exit_code == 0
+
+
+def test_cli_recent_prints_a_uuid_that_get_accepts(tmp_dir, corpus):
+    target = corpus["title_hit"]
+
+    result = CliRunner().invoke(app, ["recent", "--days", "1", "--project", str(tmp_dir)])
+
+    assert result.exit_code == 0
+    assert target.id in result.stdout
+
+    fetched = CliRunner().invoke(app, ["get", target.id, "--project", str(tmp_dir)])
+    assert fetched.exit_code == 0
+
+
+def test_ids_survive_a_narrow_terminal(tmp_dir, corpus, monkeypatch):
+    """A 40-column terminal must still yield a complete, usable UUID."""
+    from src.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main.console, "_width", 40, raising=False)
+    target = corpus["title_hit"]
+
+    result = CliRunner().invoke(app, ["grep", "pgvector", "--project", str(tmp_dir)])
+
+    assert result.exit_code == 0
+    assert target.id in result.stdout, "the UUID must not be truncated to fit"
+
+
 def test_cli_grep_prints_a_table(tmp_dir, corpus):
     result = CliRunner().invoke(app, ["grep", "pgvector", "--project", str(tmp_dir)])
 
