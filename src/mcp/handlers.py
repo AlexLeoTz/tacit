@@ -389,7 +389,13 @@ class MemoryMCPHandlers:
         }
 
     def handle_memory_get(self, node_id: str, project: Optional[str] = None) -> Dict[str, Any]:
-        """Retrieve full details of a single memory by ID in target project with full lineage tree."""
+        """Retrieve full details of a single memory by exact UUID, with its lineage.
+
+        Deliberately exact-match only: this tool retrieves one specific node's
+        content, and resolving a partial id risks returning a different memory
+        than the caller meant. Use ``memory_grep`` or ``memory_search`` to find
+        an id first; both print full UUIDs.
+        """
         from ..core.memory_dag import MemoryDAG
 
         storage = self._resolve_storage(project)
@@ -397,7 +403,11 @@ class MemoryMCPHandlers:
         if not node:
             return {
                 "found": False,
-                "message": f"Memory node with ID '{node_id}' was not found.",
+                "message": (
+                    f"No memory node with the exact UUID '{node_id}'. "
+                    "memory_get requires the complete UUID; use memory_grep or memory_search "
+                    "to locate the node first."
+                ),
             }
 
         # Build lineage tree
@@ -480,6 +490,62 @@ Merkle Root: {node.merkle_root}
             "memory": node.to_dict(),
             "formatted": formatted,
         }
+
+    def handle_memory_grep(
+        self,
+        keyword: str,
+        type: Optional[str] = None,
+        limit: int = 50,
+        include_superseded: bool = False,
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Find memories whose title or summary contains ``keyword`` (substring).
+
+        Cheaper and more literal than ``memory_search``: no embeddings, no
+        ranking, no content scan. Useful for locating a known phrase or an exact
+        symbol when semantic search is unavailable or too fuzzy.
+        """
+        storage = self._resolve_storage(project)
+        matches = storage.grep_memories(
+            keyword,
+            limit=limit,
+            memory_type=type,
+            include_superseded=include_superseded,
+        )
+
+        if not matches:
+            proj_hint = f" in project '{project}'" if project else ""
+            return {
+                "count": 0,
+                "results": [],
+                "formatted": (
+                    f"No memory title or summary contains '{keyword}'{proj_hint}.\n"
+                    "grep matches titles and summaries only; use memory_search to search "
+                    "content semantically."
+                ),
+            }
+
+        needle = keyword.strip().lower()
+        lines = [f"{len(matches)} memories matching '{keyword}' in title or summary:\n"]
+        items = []
+        for node in matches:
+            date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+            hit = "title" if needle in (node.title or "").lower() else "summary"
+            lines.append(
+                f"- [{date_str}] ({node.type.upper()}) {node.title or node.summary} "
+                f"[{hit} match] (ID: `{node.id}`)"
+            )
+            lines.append(f"  Summary: {node.summary}")
+            items.append({
+                "id": node.id,
+                "timestamp": node.timestamp,
+                "type": node.type,
+                "title": node.title,
+                "summary": node.summary,
+                "matched_in": hit,
+            })
+
+        return {"count": len(matches), "results": items, "formatted": "\n".join(lines)}
 
     def handle_memory_recent(
         self, days: int = 7, limit: int = 20, project: Optional[str] = None

@@ -116,6 +116,28 @@ def create_mcp_server(
         return res.get("formatted") or json.dumps(res, indent=2)
 
     @mcp.tool(description=(
+        "Find memories whose TITLE or SUMMARY contains a keyword, as a plain "
+        "case-insensitive substring. Unlike memory_search this is not semantic and "
+        "does not read content: it is exact, instant, and needs no embedding model, "
+        "so it works when the embedding provider is unavailable. Use it to locate a "
+        "known phrase, symbol or component name; use memory_search for meaning."
+    ))
+    def memory_grep(
+        keyword: str,
+        type: Optional[str] = None,
+        limit: int = 50,
+        include_superseded: bool = False,
+    ) -> str:
+        """Find memories whose title or summary contains a keyword."""
+        res = handlers.handle_memory_grep(
+            keyword=keyword,
+            type=type,
+            limit=limit,
+            include_superseded=include_superseded,
+        )
+        return res.get("formatted") or json.dumps(res, indent=2)
+
+    @mcp.tool(description=(
         "Generate a token-budgeted project briefing ranked by PageRank authority "
         "(how many later memories trace back to it), with impact and recency as "
         "bounded tie-breakers. Call this at the start of a session to load "

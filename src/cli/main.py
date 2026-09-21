@@ -12,6 +12,7 @@ import yaml
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 import typer
@@ -480,36 +481,106 @@ def reindex(
 
 @app.command()
 def get(
-    node_id: str = typer.Argument(..., help="Memory node ID (or prefix)"),
+    node_id: str = typer.Argument(..., help="Full UUID of the memory node to retrieve"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+    raw: bool = typer.Option(
+        False, "--raw", help="Print the raw Markdown only, for copying or piping"
+    ),
+):
+    """Print one memory node in full, exactly as stored. Requires the complete UUID."""
+    storage = get_storage(project)
+    node = storage.get_memory(node_id)
+
+    if not node:
+        # Deliberately no prefix matching: `get` retrieves one exact node, and a
+        # partial id could resolve to a different memory than intended.
+        console.print(
+            f"[red]No memory node with the exact UUID '{node_id}'.[/red]\n"
+            "[dim]`tacit get` requires the full UUID. Find it with "
+            f'[bold cyan]tacit grep "KEYWORD"[/bold cyan] or [bold cyan]tacit search "QUERY"[/bold cyan].[/dim]'
+        )
+        raise typer.Exit(code=1)
+
+    exporter = MarkdownExporter(storage)
+    md_content = exporter.format_node_markdown(node)
+
+    if raw:
+        # Straight to stdout: no panel, no wrapping, no markup parsing.
+        console.print(md_content, markup=False, highlight=False, soft_wrap=True)
+        return
+
+    # Rendered as Text, not as markup: memory content legitimately contains
+    # square brackets (`[WinError 32]`, `[the docs](url)`), and Rich would
+    # silently delete any of them that begin with a lowercase letter, treating
+    # them as style tags. The whole point of `get` is the content.
+    console.print(
+        Panel(
+            Text(md_content),
+            title=f"Memory Node: {node.id}",
+            border_style="cyan",
+            subtitle="[dim]use --raw for copy-paste output[/dim]",
+        )
+    )
+
+
+@app.command()
+def grep(
+    keyword: str = typer.Argument(..., help="Substring to find in a memory title or summary"),
+    type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by memory type"
+    ),
+    limit: int = typer.Option(50, "--limit", "-n", help="Maximum results to display"),
+    all_status: bool = typer.Option(
+        False,
+        "--all-status",
+        "--include-superseded",
+        help="Include superseded memories",
+    ),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Target project name or directory"
     ),
 ):
-    """Get full details of a specific memory entry."""
+    """Find memories whose title or summary contains a keyword (plain substring, not semantic)."""
     storage = get_storage(project)
+    results = storage.grep_memories(
+        keyword,
+        limit=limit,
+        memory_type=type,
+        include_superseded=all_status,
+    )
 
-    node = storage.get_memory(node_id)
-    if not node:
-        # Search by prefix if exact match not found
-        all_memories = storage.get_all(limit=1000)
-        matches = [m for m in all_memories if m.id.startswith(node_id)]
-        if len(matches) == 1:
-            node = matches[0]
-        elif len(matches) > 1:
-            console.print(
-                f"[yellow]Multiple matches found for prefix '{node_id}'. Please specify full UUID.[/yellow]"
-            )
-            return
-
-    if not node:
-        console.print(f"[red]Memory entry '{node_id}' not found.[/red]")
+    if not results:
+        proj_hint = f" in project '{project}'" if project else ""
+        console.print(
+            f"[yellow]No memory title or summary contains '{keyword}'{proj_hint}.[/yellow]\n"
+            "[dim]grep matches titles and summaries only. Use "
+            f"[bold cyan]tacit search \"{keyword}\"[/bold cyan] to search content too.[/dim]"
+        )
         return
 
-    exporter = MarkdownExporter(storage)
-    md_content = exporter.format_node_markdown(node)
-    console.print(
-        Panel(md_content, title=f"Memory Node: {node.id}", border_style="cyan")
+    table = Table(
+        title=f"Titles/summaries matching '{keyword}' ({len(results)} found)",
+        show_header=True,
+        header_style="bold cyan",
     )
+    table.add_column("Date", style="dim", width=16)
+    table.add_column("Type", style="magenta", width=14)
+    table.add_column("Title / Summary", style="white", min_width=25)
+    table.add_column("ID", style="dim", width=9)
+
+    for node in results:
+        date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+        status_flag = f" [{node.status.upper()}]" if node.status != "active" else ""
+        table.add_row(
+            date_str,
+            _esc(f"[{node.type}]{status_flag}"),
+            _esc(node.title or node.summary),
+            node.id[:8],
+        )
+
+    console.print(table)
 
 
 @app.command()

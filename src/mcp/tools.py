@@ -157,16 +157,45 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_get",
-        "description": "Retrieve full details, content, tags, and lineage of a specific memory entry by ID.",
+        "description": "Retrieve full details, content, tags, and lineage of one specific memory by its complete UUID. Exact match only -- find the id first with memory_grep or memory_search, which both print full UUIDs.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "node_id": {
                     "type": "string",
-                    "description": "The unique UUID of the memory node.",
+                    "description": "The complete UUID of the memory node (not a prefix).",
                 },
             },
             "required": ["node_id"],
+        },
+    },
+    {
+        "name": "memory_grep",
+        "description": "Find memories whose TITLE or SUMMARY contains a keyword, as a plain case-insensitive substring. Not semantic and does not read content: exact, instant, and requires no embedding model, so it works when the embedding provider is unavailable. Use it to locate a known phrase, symbol or component name; use memory_search for meaning.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "Substring to look for in titles and summaries (e.g. 'pgvector', 'WinError 32').",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": MEMORY_TYPES,
+                    "description": "Optional category filter.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of matches to return.",
+                },
+                "include_superseded": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include memories that have been superseded.",
+                },
+            },
+            "required": ["keyword"],
         },
     },
     {

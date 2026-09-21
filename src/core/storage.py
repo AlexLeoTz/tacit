@@ -8,6 +8,11 @@ import threading
 from .memory_node import MemoryNode
 
 
+def _escape_like(text: str) -> str:
+    """Neutralise LIKE wildcards so a keyword of ``50%`` matches literally."""
+    return text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
 class MemoryStorage:
     """Thread-safe SQLite storage with FTS5 full-text indexing."""
 
@@ -295,6 +300,54 @@ class MemoryStorage:
                 if row:
                     return MemoryNode.from_dict(dict(row))
                 return None
+            finally:
+                conn.close()
+
+    def grep_memories(
+        self,
+        keyword: str,
+        limit: int = 50,
+        memory_type: Optional[str] = None,
+        include_superseded: bool = False,
+    ) -> List[MemoryNode]:
+        """Substring search across titles and summaries only.
+
+        Deliberately a LIKE scan rather than a full-text query: grep should find
+        partial words and symbols (``WinError``, ``pgvector``) that tokenised
+        search splits or misses, and it must not reach into full content --
+        searching bodies would make it a worse ``search``.
+        """
+        needle = (keyword or "").strip()
+        if not needle:
+            return []
+
+        pattern = f"%{_escape_like(needle)}%"
+        conditions = ["(title LIKE ? ESCAPE '!' OR summary LIKE ? ESCAPE '!')"]
+        params: List[Any] = [pattern, pattern]
+
+        if not include_superseded:
+            conditions.append("(status = 'active' OR status IS NULL)")
+        if memory_type:
+            conditions.append("type = ?")
+            params.append(memory_type)
+
+        # Title hits first, then most recent: a title match is what was asked for.
+        params.extend([pattern, max(1, limit)])
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM memories
+                    WHERE {' AND '.join(conditions)}
+                    ORDER BY (CASE WHEN title LIKE ? ESCAPE '!' THEN 0 ELSE 1 END),
+                             timestamp DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+                return [MemoryNode.from_dict(dict(row)) for row in rows]
             finally:
                 conn.close()
 

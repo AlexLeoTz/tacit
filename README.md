@@ -331,6 +331,30 @@ tacit recent --days 7
 tacit recent --days 30 --type error --limit 20
 ```
 
+### Retrieve a Specific Memory
+```bash
+# Requires the complete UUID; --raw prints the stored Markdown with no panel
+tacit get a1b2c3d4-e5f6-7890-abcd-ef1234567890
+tacit get a1b2c3d4-e5f6-7890-abcd-ef1234567890 --raw
+```
+
+> `get` is an exact lookup — find the UUID with `tacit grep "KEYWORD"` or
+> `tacit search "QUERY"`, both of which print it in full. Content is shown
+> verbatim, brackets and all.
+
+### Grep Titles and Summaries
+```bash
+# Literal, case-insensitive substring match over titles and summaries only
+tacit grep pgvector
+
+# Narrow by type, and include superseded entries
+tacit grep "WinError 32" --type error --all-status
+```
+
+> `grep` never reads `content` and needs no embedding model, so it works even when
+> semantic search is unavailable. Use `tacit search "..."` when you know the meaning
+> rather than the words.
+
 ### Export Standalone Markdown Documentation
 ```bash
 # Export all memories to categorized markdown files with an INDEX.md table of contents
@@ -461,7 +485,8 @@ When connected via MCP, AI agents have access to the following 6 tools:
 | `memory_add` | Persist an immutable decision, command, hack, architecture, or error. Supports auto-linking and orphan warnings. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
 | `memory_link` | Explicitly attach or adjust causal edges between nodes (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
 | `memory_search` | Hybrid search (BM25 + dense vectors via RRF), ranked by relevance × PageRank authority. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
-| `memory_get` | Fetch markdown content and Merkle lineage by ID. Shows alert banners if superseded or retracted. | `node_id` |
+| `memory_get` | Fetch markdown content and Merkle lineage by exact UUID. Shows alert banners if superseded or retracted. | `node_id` |
+| `memory_grep` | Literal case-insensitive substring match over titles and summaries only. No embeddings, no content scan, so it works when the provider is unavailable. | `keyword`, `type`, `limit`, `include_superseded` |
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
 | `memory_context` | Generate a token-budgeted project briefing ranked by PageRank authority (impact and recency as bounded tie-breakers). | `budget`, `scope_hint`, `timeframe` |
 | `memory_projects`| List all registered project workspaces across your machine. | None |
