@@ -2,10 +2,18 @@
 
 from typing import Any, Dict, List
 
+from ..utils.config import Config
+
+#: Derived from the single taxonomy definition so the schemas can never drift
+#: from ``Config.MEMORY_TYPES``.
+MEMORY_TYPES: List[str] = list(Config.MEMORY_TYPES)
+DEFAULT_MEMORY_TYPE: str = Config.DEFAULT_MEMORY_TYPE
+MEMORY_TYPE_HINT = ", ".join(MEMORY_TYPES)
+
 TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "memory_add",
-        "description": "Persist a new immutable memory node (decision, command, hack, architecture, error, or context) to surviving project storage. The content field must be rich and comprehensive.",
+        "description": f"Persist a new immutable memory node to surviving project storage. One of: {MEMORY_TYPE_HINT}. The content field must be rich and comprehensive.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -15,8 +23,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "type": {
                     "type": "string",
-                    "enum": ["decision", "command", "hack", "architecture", "error", "context"],
-                    "default": "decision",
+                    "enum": MEMORY_TYPES,
+                    "default": DEFAULT_MEMORY_TYPE,
                     "description": "Categorical classification of the memory entry.",
                 },
                 "summary": {
@@ -25,7 +33,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "title": {
                     "type": "string",
-                    "description": "Short descriptive title for indexing.",
+                    "description": "REQUIRED. Specific, self-contained title that names the subject (e.g. 'Replaced Redis sessions with signed JWT cookies'). This is embedded into the vector index together with the summary, so a vague title ('auth fix') makes the memory unfindable by semantic search. Do not start with the category name.",
                 },
                 "tags": {
                     "type": "array",
@@ -78,9 +86,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                         "type": "object",
                         "properties": {
                             "content": {"type": "string", "description": "Comprehensive Markdown explanation."},
-                            "type": {"type": "string", "enum": ["decision", "command", "hack", "architecture", "error", "context"], "default": "decision"},
+                            "type": {"type": "string", "enum": MEMORY_TYPES, "default": DEFAULT_MEMORY_TYPE},
                             "summary": {"type": "string", "description": "1-sentence summary."},
-                            "title": {"type": "string", "description": "Short title."},
+                            "title": {"type": "string", "description": "REQUIRED. Specific, self-contained title; embedded into the vector index."},
                             "tags": {"type": "array", "items": {"type": "string"}},
                             "scope": {"type": "array", "items": {"type": "string"}},
                             "impact": {"type": "string", "enum": ["high", "medium", "low"], "default": "medium"},
@@ -89,7 +97,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                             "related": {"type": "array", "items": {"type": "string"}},
                             "relation_note": {"type": "string"},
                         },
-                        "required": ["content"],
+                        "required": ["content", "title"],
                     },
                     "description": "List of memory entries to record in order.",
                 },
@@ -109,7 +117,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "type": {
                     "type": "string",
-                    "enum": ["decision", "command", "hack", "architecture", "error", "context"],
+                    "enum": MEMORY_TYPES,
                     "description": "Optional category filter.",
                 },
                 "tags": {
@@ -182,7 +190,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_context",
-        "description": "Generate a relevance-ranked, token-budgeted project briefing (decisions, architecture, hacks, errors) based on DAG centrality, impact, and recency decay to bootstrap agent context.",
+        "description": "Generate a token-budgeted project briefing ranked by PageRank authority (how many later memories trace back to it), with impact and recency as bounded tie-breakers. Use at session start to load institutional context.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -194,12 +202,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope_hint": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional open file paths or active modules to bias ranking.",
+                    "description": "File paths or modules currently being worked on; matching memories are boosted.",
                 },
                 "timeframe": {
                     "type": "string",
                     "default": "all",
-                    "description": "Optional timeframe parameter for backward compatibility.",
+                    "description": "Filter which memories may appear: 'all', 'week', '30d', '6h', 'year', or an ISO date. Ranking still uses the whole graph.",
                 },
             },
         },

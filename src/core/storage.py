@@ -267,7 +267,7 @@ class MemoryStorage:
                     from ..search.vectordb import normalize, serialize_f32
                     embed_svc = EmbeddingService.get()
                     if embed_svc.available:
-                        text = build_embed_text(title=node.title, tags=node.tags, summary=node.summary, content=node.content)
+                        text = build_embed_text(title=node.title, tags=node.tags, summary=node.summary)
                         raw_vec = embed_svc.embed_documents([text])[0]
                         norm_vec = normalize(raw_vec)
                         blob = serialize_f32(norm_vec)
@@ -768,8 +768,39 @@ class MemoryStorage:
             finally:
                 conn.close()
 
-    def reindex_all(self, progress: bool = True) -> Tuple[int, int]:
-        """Resumable backfill of vector embeddings for all memories lacking embeddings."""
+    def count_stale_embeddings(self) -> int:
+        """Count memories whose stored vector has a different width than the active provider.
+
+        Vectors from a different model are not comparable, so these rows are
+        skipped by search until they are re-embedded. Surfacing the count lets
+        `tacit reindex --force` explain *why* semantic search got worse.
+        """
+        from ..search.embeddings import EmbeddingService
+
+        dimension = EmbeddingService.get().dimension
+        if dimension <= 0:
+            return 0
+        expected_bytes = dimension * 4
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL AND LENGTH(embedding) != ?",
+                    (expected_bytes,),
+                ).fetchone()
+                return int(row[0]) if row else 0
+            except Exception:
+                return 0
+            finally:
+                conn.close()
+
+    def reindex_all(self, progress: bool = True, force: bool = False) -> Tuple[int, int]:
+        """Backfill vector embeddings, or rebuild every vector when ``force`` is set.
+
+        ``force`` is required after switching embedding providers: existing rows
+        already have an ``embedded_at`` value, but their vectors come from a
+        different model and cannot be compared with new queries.
+        """
         from ..search.embeddings import EmbeddingService
         from ..search.hybrid import build_embed_text
         from ..search.vectordb import normalize, serialize_f32
@@ -781,8 +812,9 @@ class MemoryStorage:
         with self._lock:
             conn = self._get_connection()
             try:
+                condition = "" if force else "WHERE embedded_at IS NULL"
                 rows = conn.execute(
-                    "SELECT id, title, tags, summary, content, timestamp FROM memories WHERE embedded_at IS NULL"
+                    f"SELECT id, title, tags, summary, timestamp FROM memories {condition}"
                 ).fetchall()
                 total = len(rows)
                 if total == 0:
@@ -796,13 +828,13 @@ class MemoryStorage:
                     for r in chunk:
                         import json
                         tags_list = json.loads(r[2]) if r[2] else []
-                        texts.append(build_embed_text(title=r[1], tags=tags_list, summary=r[3], content=r[4]))
+                        texts.append(build_embed_text(title=r[1], tags=tags_list, summary=r[3]))
 
                     vecs = embed_svc.embed_documents(texts)
                     for r, v in zip(chunk, vecs):
                         norm_v = normalize(v)
                         blob = serialize_f32(norm_v)
-                        conn.execute("UPDATE memories SET embedding = ?, embedded_at = ? WHERE id = ?", (blob, r[5], r[0]))
+                        conn.execute("UPDATE memories SET embedding = ?, embedded_at = ? WHERE id = ?", (blob, r[4], r[0]))
                     done += len(chunk)
                     conn.commit()
                 return done, total

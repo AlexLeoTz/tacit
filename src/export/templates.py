@@ -1,5 +1,43 @@
 """Markdown and HTML templates for export and live preview with Theme and Clear All support."""
 
+from ..utils.config import Config
+
+#: Tailwind colour family per category. Categories without an entry fall back to
+#: the neutral `context` styling in the dashboard.
+CATEGORY_COLORS = {
+    "decision": "blue",
+    "architecture": "purple",
+    "hack": "amber",
+    "command": "emerald",
+    "error": "rose",
+    "context": "zinc",
+    "constraint": "orange",
+    "convention": "indigo",
+    "security": "red",
+    "performance": "teal",
+    "integration": "cyan",
+    "migration": "violet",
+}
+
+#: Placeholder tokens replaced once the dashboard template string is defined.
+_CATEGORY_OPTIONS_TOKEN = "<!--TACIT_CATEGORY_OPTIONS-->"
+_CATEGORY_BADGE_TOKEN = "/*TACIT_CATEGORY_BADGE_CASES*/"
+
+_CATEGORY_OPTIONS_HTML = "\n".join(
+    f'                            <option value="{name}">{name.capitalize()}</option>'
+    for name in Config.MEMORY_TYPES
+)
+
+_CATEGORY_BADGE_CASES_JS = "\n".join(
+    "                case '{name}':\n"
+    "                    return 'bg-{color}-100 text-{color}-800 dark:bg-{color}-950/70 "
+    "dark:text-{color}-300 border-{color}-300 dark:border-{color}-800/80';".format(
+        name=name, color=CATEGORY_COLORS.get(name, "zinc")
+    )
+    for name in Config.MEMORY_TYPES
+    if name != "context"
+)
+
 MEMORY_MARKDOWN_TEMPLATE = """# {title}
 
 **ID**: `{id}`  
@@ -180,12 +218,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
             <div>
                 <select id="filter-select" onchange="currentFilter = this.value; renderList();" class="w-full px-2.5 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md text-xs outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer">
                     <option value="all">All Categories</option>
-                    <option value="decision">Decision</option>
-                    <option value="architecture">Architecture</option>
-                    <option value="hack">Hack</option>
-                    <option value="command">Command</option>
-                    <option value="error">Error</option>
-                    <option value="context">Context</option>
+<!--TACIT_CATEGORY_OPTIONS-->
                 </select>
             </div>
         </div>
@@ -273,7 +306,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                 </button>
             </div>
             <div class="text-xs text-zinc-500 dark:text-zinc-400 mb-4 leading-relaxed">
-                Tacit stores <strong>Tacit Knowledge</strong> (architectural decisions, hacks, operational commands, and error caveats). Do not store transient code or chat logs.
+                Tacit stores <strong>Tacit Knowledge</strong>: decisions, architecture, errors, hacks, commands, context, constraints, conventions, security, performance, integrations, and migrations. Do not store transient code or chat logs.
             </div>
             <form id="add-memory-form" onsubmit="submitNewMemory(event)" class="space-y-4 text-xs">
                 <div class="grid grid-cols-3 gap-3">
@@ -284,12 +317,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
                     <div>
                         <label class="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Type</label>
                         <select id="add-type" class="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-md outline-none cursor-pointer focus:ring-1 focus:ring-cyan-500">
-                            <option value="decision">Decision</option>
-                            <option value="architecture">Architecture</option>
-                            <option value="hack">Hack</option>
-                            <option value="command">Command</option>
-                            <option value="error">Error</option>
-                            <option value="context">Context</option>
+<!--TACIT_CATEGORY_OPTIONS-->
                         </select>
                     </div>
                 </div>
@@ -548,16 +576,7 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
         function getBadgeClass(type) {
             const t = (type || 'decision').toLowerCase();
             switch (t) {
-                case 'architecture':
-                    return 'bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-300 dark:border-purple-800/80';
-                case 'decision':
-                    return 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-300 dark:border-blue-800/80';
-                case 'hack':
-                    return 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-300 dark:border-amber-800/80';
-                case 'command':
-                    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/80';
-                case 'error':
-                    return 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-300 dark:border-rose-800/80';
+/*TACIT_CATEGORY_BADGE_CASES*/
                 case 'context':
                 default:
                     return 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700';
@@ -796,3 +815,12 @@ HTML_PREVIEW_TEMPLATE = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+# Resolve the taxonomy placeholders now that the template string exists, so the
+# dashboard filters, the "Add Memory" form and the badge colours all track
+# Config.MEMORY_TYPES instead of a hand-maintained copy.
+HTML_PREVIEW_TEMPLATE = (
+    HTML_PREVIEW_TEMPLATE
+    .replace(_CATEGORY_OPTIONS_TOKEN, _CATEGORY_OPTIONS_HTML)
+    .replace(_CATEGORY_BADGE_TOKEN, _CATEGORY_BADGE_CASES_JS)
+)

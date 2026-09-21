@@ -23,14 +23,33 @@ class Config:
     TOKEN_BUDGET: int = int(os.getenv("TACIT_TOKEN_BUDGET", "2000"))
     DUAL_WRITE: bool = os.getenv("TACIT_DUAL_WRITE", "true").lower() in ("true", "1", "yes")
 
+    #: The closed Tacit taxonomy. Single source of truth: the MCP tool schemas,
+    #: the dashboard filters, the CLI help and the generated agent rules all
+    #: derive from this list, so adding a category here updates every surface.
+    #:
+    #: The set is deliberately finite. Each entry must answer a different
+    #: question and drive a different level of required detail, otherwise
+    #: entries fragment across near-synonyms and the briefing/dashboard
+    #: grouping degrades. Do not extend it casually.
     MEMORY_TYPES = [
-        "decision",
-        "command",
-        "hack",
-        "architecture",
-        "error",
-        "context",
+        # --- core (in use since the first release) ---
+        "decision",      # a choice between alternatives, and why the others lost
+        "command",       # an operational invocation needed to reproduce work
+        "hack",          # a deliberate workaround for an external limitation
+        "architecture",  # system structure: components, boundaries, data flow
+        "error",         # a diagnosed failure, its root cause, and the fix
+        "context",       # descriptive environment, domain, or business background
+        # --- extended (distinct required detail, not covered above) ---
+        "constraint",    # a binding limit: quota, licence, compliance, platform
+        "convention",    # a normative rule for how code must be written here
+        "security",      # authn/authz model, threat mitigations, secret handling
+        "performance",   # measured baseline, bottleneck, and the delta achieved
+        "integration",   # an external service/API/dependency contract and its quirks
+        "migration",     # a schema/data/version migration with rollout and rollback
     ]
+
+    #: Default category applied when a caller does not specify one.
+    DEFAULT_MEMORY_TYPE = "decision"
 
     @classmethod
     def find_project_root(cls, start_path: Optional[str | Path] = None) -> Path:

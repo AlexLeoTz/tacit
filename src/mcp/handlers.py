@@ -126,6 +126,22 @@ class MemoryMCPHandlers:
         if warning_msg:
             warning_msg = warning_msg.replace("{node_id_placeholder}", node_id)
 
+        # Titles are embedded into the vector index alongside the summary, so a
+        # missing or generic title directly degrades semantic recall. Warn rather
+        # than reject: losing the memory outright would be worse.
+        title_notice = ""
+        if not title or not title.strip():
+            title_notice = (
+                "\n[TACIT TITLE NOTICE] No `title` was supplied, so an auto-derived snippet is being "
+                "embedded instead. Semantic search quality depends on the title — re-record future "
+                "entries with a specific, self-contained title."
+            )
+        elif len(title.strip()) < 15:
+            title_notice = (
+                f"\n[TACIT TITLE NOTICE] Title '{title.strip()}' is very short. Titles are embedded into "
+                "the vector index; a specific phrase is far easier to retrieve later."
+            )
+
         node = MemoryNode(
             id=node_id,
             timestamp=datetime.now().astimezone().timestamp(),
@@ -162,7 +178,7 @@ class MemoryMCPHandlers:
                     {"id": c["node"].id, "summary": c["node"].summary, "type": c["node"].type, "score": c["score"]}
                     for c in suggested_candidates
                 ],
-                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}{warning_msg}",
+                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}{warning_msg}{title_notice}",
             }
         else:
             return {
@@ -487,6 +503,7 @@ Merkle Root: {node.merkle_root}
             storage=storage,
             budget=budget if budget is not None else Config.TOKEN_BUDGET,
             scope_hint=scope_hint,
+            timeframe=timeframe,
         )
         return briefing_res
 

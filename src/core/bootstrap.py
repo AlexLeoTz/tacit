@@ -1,14 +1,20 @@
 """Bootstrap Relevance Scoring and Briefing Engine for Tacit.
 
-Replaces naive timeframe bootstrapping with a DAG-centrality, impact, recency-decay,
-and token-budgeted multi-tier briefing algorithm.
+Ranking is driven by **PageRank authority** (see ``src/core/authority.py``): a
+memory that many later memories trace back to is worth bootstrapping an agent
+with, whether or not it is recent. Impact and recency are retained as *bounded
+multipliers* so they can reorder memories of comparable authority but can never
+overturn a large authority gap, and the supersede penalty stays subtractive so a
+memory sitting next to a correction can still be pushed down or out.
 """
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .authority import compute_authority
 from .memory_node import MemoryNode
 from ..utils.config import Config
 
@@ -17,11 +23,13 @@ from ..utils.config import Config
 # Stage 0 — Configuration & Default Weights
 # ==============================================================================
 
-WEIGHTS = {
-    "impact": 0.35,      # Agent-assigned severity (noisy -> moderate trust)
-    "centrality": 0.40,  # How many later active decisions were built on this
-    "recency": 0.25,     # Gentle freshness bias, never decisive alone
-}
+#: Impact multiplier spans [0.6, 1.0]: a low-impact note is discounted, never
+#: silenced, because impact is agent-assigned and therefore noisy.
+IMPACT_FLOOR = 0.6
+
+#: Recency multiplier spans [0.7, 1.0]. Authority already handles "is this
+#: load-bearing"; recency only breaks ties between equally authoritative entries.
+RECENCY_FLOOR = 0.7
 
 IMPACT_SCORES = {
     "high": 1.0,
@@ -29,25 +37,71 @@ IMPACT_SCORES = {
     "low": 0.3,
 }
 
-CENTRALITY_SATURATION_K = 8    # Descendant count where centrality ~= 0.89
 RECENCY_HALF_LIFE_DAYS = 180   # A memory loses half its recency score in 6 months
 PENALTY_MAX = 0.30             # Max deduction when a neighbor was superseded
 PENALTY_HALF_LIFE_DAYS = 60    # The deduction fades over ~2 months
+SCOPE_BOOST = 0.25             # Multiplier bonus when a node matches scope_hint
 
 TOKEN_BUDGET = Config.TOKEN_BUDGET
 FULL_TIER_BUDGET_FRACTION = 0.60  # 60% of budget -> full content, rest -> one-liners
 MIN_FULL_ENTRIES = 3              # Always brief deeply on at least 3 nodes if available
 MAX_TAG_SHARE_IN_FULL = 0.5       # Diversity guard: max fraction of deep tier for 1 tag
 
-TYPE_PRIOR = {"command": 0.0}     # Optional category prior adjustments
+#: Optional per-category multiplier, e.g. ``{"constraint": 0.2}`` to promote every
+#: binding constraint. Applied as ``(1 + TYPE_PRIOR[type])``; values must be > -1.
+TYPE_PRIOR: Dict[str, float] = {}
+
+#: Relative timeframes accepted by ``tacit briefing --timeframe`` / ``memory_context``.
+TIMEFRAME_UNITS = {
+    "hour": 1 / 24,
+    "day": 1.0,
+    "week": 7.0,
+    "month": 30.0,
+    "quarter": 91.0,
+    "year": 365.0,
+}
+
+
+def parse_timeframe(timeframe: Optional[str], now_ts: Optional[float] = None) -> Optional[float]:
+    """Return the oldest timestamp still in scope, or ``None`` for "everything".
+
+    Accepts ``all``/``None``/empty, a relative name (``week``, ``30d``, ``6h``,
+    ``2w``, ``year``) or an ISO date (``2026-01-31``). Unparseable input is
+    treated as "all" rather than raising: a bad timeframe must not break an
+    agent's session bootstrap.
+    """
+    if timeframe is None:
+        return None
+    text = str(timeframe).strip().lower()
+    if not text or text in ("all", "any", "everything", "forever"):
+        return None
+
+    now_ts = now_ts or datetime.now(timezone.utc).timestamp()
+
+    if text in TIMEFRAME_UNITS:
+        return now_ts - TIMEFRAME_UNITS[text] * 86400.0
+
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([hdwmy])", text)
+    if match:
+        amount = float(match.group(1))
+        unit_days = {"h": 1 / 24, "d": 1.0, "w": 7.0, "m": 30.0, "y": 365.0}[match.group(2)]
+        return now_ts - amount * unit_days * 86400.0
+
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 @dataclass
 class Features:
     """Computed ranking feature values for a candidate memory node."""
 
+    authority: float   # PageRank authority, normalised to [0, 1]
     impact: float
-    centrality: float
     recency: float
     penalty: float
 
@@ -75,7 +129,11 @@ def dominant_tag(node: MemoryNode) -> str:
 
 
 def topological_sort(nodes: List[str], children: Dict[str, Set[str]]) -> List[str]:
-    """Perform topological sort over nodes (returns topological order, or arbitrary on cycles)."""
+    """Perform topological sort over nodes (returns topological order, or arbitrary on cycles).
+
+    Retained as a graph utility; briefing ranking no longer uses it because
+    PageRank replaced the descendant-count centrality it served.
+    """
     in_degree: Dict[str, int] = {n: 0 for n in nodes}
     for u in nodes:
         for v in children.get(u, set()):
@@ -106,61 +164,16 @@ class BootstrapEngine:
     """Autonomous briefing engine executing relevance scoring and token assembly."""
 
     @classmethod
-    def compute_descendant_counts(
-        cls,
-        active_nodes: List[MemoryNode],
-        edges: List[Dict[str, Any]],
-    ) -> Dict[str, int]:
-        """Compute distinct active descendant count for each node via 'derives_from' edges.
-
-        Supersedes edges do NOT count toward centrality (being corrected is not importance).
-        """
-        active_ids = {n.id for n in active_nodes}
-        children: Dict[str, Set[str]] = defaultdict(set)
-
-        # Build adjacency graph from explicit edges table or fallback to node.parents
-        if edges:
-            for e in edges:
-                parent_id = e.get("parent_id")
-                child_id = e.get("child_id")
-                relation = e.get("relation", "derives_from")
-                if relation == "derives_from" and parent_id in active_ids and child_id in active_ids:
-                    children[parent_id].add(child_id)
-        else:
-            for node in active_nodes:
-                for parent_id in node.parents:
-                    if parent_id in active_ids:
-                        children[parent_id].add(node.id)
-
-        all_node_ids = list(active_ids)
-        topo_order = topological_sort(all_node_ids, children)
-
-        desc_sets: Dict[str, Set[str]] = defaultdict(set)
-        # Process in reverse topological order (leaves first)
-        for nid in reversed(topo_order):
-            s: Set[str] = set()
-            for c in children.get(nid, set()):
-                s.add(c)
-                s.update(desc_sets.get(c, set()))
-            desc_sets[nid] = s
-
-        return {nid: len(desc_sets.get(nid, set())) for nid in all_node_ids}
-
-    @classmethod
     def compute_node_features(
         cls,
         node: MemoryNode,
         now_ts: float,
-        desc_counts: Dict[str, int],
+        authority: float,
         superseded_events: Dict[str, float],
         neighbor_map: Dict[str, Set[str]],
     ) -> Features:
-        """Compute normalized [0, 1] feature terms and implication penalties."""
+        """Collect the ranking features for a node; ``authority`` comes from PageRank."""
         f_impact = IMPACT_SCORES.get(node.impact.lower(), 0.6)
-
-        # Saturating centrality curve: 0 -> 0.0, 8 -> 0.50, ...
-        n = desc_counts.get(node.id, 0)
-        f_centrality = float(n) / float(n + CENTRALITY_SATURATION_K)
 
         # Half-life decay for recency
         age_days = max(0.0, (now_ts - node.timestamp) / 86400.0)
@@ -177,22 +190,26 @@ class BootstrapEngine:
                 penalty = max(penalty, deduction)
 
         return Features(
+            authority=max(0.0, min(1.0, float(authority))),
             impact=f_impact,
-            centrality=f_centrality,
             recency=f_recency,
             penalty=penalty,
         )
 
     @classmethod
     def score(cls, f: Features, node_type: str) -> float:
-        """Compute composite score from features."""
-        base = (
-            WEIGHTS["impact"] * f.impact
-            + WEIGHTS["centrality"] * f.centrality
-            + WEIGHTS["recency"] * f.recency
-        )
-        total = base + TYPE_PRIOR.get(node_type.lower(), 0.0) - f.penalty
-        return total
+        """Combine features into a score where authority leads.
+
+        ``authority * impact_multiplier * recency_multiplier - penalty``: the two
+        multipliers are bounded into [0.6, 1.0] and [0.7, 1.0], so together they
+        can move a memory by at most ~2.4x and cannot outvote a decisive
+        authority gap. The supersede penalty stays subtractive so a memory
+        sitting next to a correction can still be pushed out entirely.
+        """
+        impact_multiplier = IMPACT_FLOOR + (1.0 - IMPACT_FLOOR) * f.impact
+        recency_multiplier = RECENCY_FLOOR + (1.0 - RECENCY_FLOOR) * f.recency
+        prior = 1.0 + TYPE_PRIOR.get(node_type.lower(), 0.0)
+        return f.authority * impact_multiplier * recency_multiplier * prior - f.penalty
 
     @classmethod
     def rank_and_diversify(
@@ -297,11 +314,19 @@ class BootstrapEngine:
         budget: int = TOKEN_BUDGET,
         now_dt: Optional[datetime] = None,
         scope_hint: Optional[List[str]] = None,
+        timeframe: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute full bootstrap briefing generation against storage."""
+        """Execute full bootstrap briefing generation against storage.
+
+        ``timeframe`` filters which memories may appear, while authority is always
+        computed over the *whole* active graph. Restricting PageRank to a recent
+        window would leave a handful of nodes with almost no links between them,
+        where every score is identical and the ranking means nothing.
+        """
         now_dt = now_dt or datetime.now(timezone.utc)
         now_ts = now_dt.timestamp()
         date_str = now_dt.strftime("%Y-%m-%d %H:%M")
+        cutoff_ts = parse_timeframe(timeframe, now_ts)
 
         # Stage 1: Select active candidates
         active_nodes = storage.get_active_memories()
@@ -338,19 +363,41 @@ class BootstrapEngine:
                 neighbor_map[n.id].add(c)
                 neighbor_map[c].add(n.id)
 
-        desc_counts = cls.compute_descendant_counts(active_nodes, edges)
+        authority_scores = compute_authority(active_nodes, edges)
+
+        # Timeframe narrows what is shown, never the graph used to rank it.
+        candidates = (
+            [n for n in active_nodes if n.timestamp >= cutoff_ts]
+            if cutoff_ts is not None
+            else list(active_nodes)
+        )
+        if not candidates:
+            return {
+                "count": 0,
+                "full_count": 0,
+                "brief_count": 0,
+                "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n\n(No active memories in timeframe '{timeframe}'.)\n═══════════════════════════════════════════════════════",
+                "full": [],
+                "brief": {},
+            }
+
+        hints = [h.strip().lower() for h in (scope_hint or []) if h and h.strip()]
 
         # Stage 3: Score all candidates
         scored_candidates: List[Tuple[float, MemoryNode, Features]] = []
-        for node in active_nodes:
+        for node in candidates:
             features = cls.compute_node_features(
                 node=node,
                 now_ts=now_ts,
-                desc_counts=desc_counts,
+                authority=authority_scores.get(node.id, 0.0),
                 superseded_events=superseded_events,
                 neighbor_map=neighbor_map,
             )
             score_val = cls.score(features, node.type)
+            if hints and any(
+                hint in str(path).lower() for path in (node.scope or []) for hint in hints
+            ):
+                score_val *= 1.0 + SCOPE_BOOST
             # Drop negatively scored nodes (actively misleading)
             if score_val >= 0.0:
                 scored_candidates.append((score_val, node, features))

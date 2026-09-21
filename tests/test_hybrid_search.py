@@ -40,16 +40,33 @@ def test_clean_query():
     assert clean_query("how do we deploy to production?") == "deploy to production"
 
 
-def test_build_embed_text():
+def test_build_embed_text_covers_title_tags_and_summary():
     text = build_embed_text(
         title="FastAPI Migration",
         tags=["fastapi", "async"],
         summary="Switched backend to FastAPI",
-        content="Detailed rationale for asynchronous request pipelines.",
     )
     assert "FastAPI Migration" in text
     assert "Tags: fastapi, async" in text
-    assert "Detailed rationale" in text
+    assert "Switched backend to FastAPI" in text
+
+
+def test_build_embed_text_excludes_full_content():
+    """Embedding content cost ~10x more per write and diluted the vector.
+
+    Only the title, tags and summary are indexed now, which is why the agent
+    rules require a descriptive title on every entry.
+    """
+    text = build_embed_text(
+        title="FastAPI Migration",
+        tags=["fastapi"],
+        summary="Switched backend to FastAPI",
+    )
+    assert "Detailed rationale" not in text
+
+    import inspect
+
+    assert "content" not in inspect.signature(build_embed_text).parameters
 
 
 def test_rrf_fusion_logic():

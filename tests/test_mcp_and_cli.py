@@ -92,13 +92,14 @@ def test_mcp_add_batch(mcp_fixture):
 
 def test_cli_commands():
     runner = CliRunner()
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_dir = Path(tmpdir) / "cli_memories"
-        Config.MEMORY_DIR = test_dir
-        Config.DB_PATH = test_dir / "memory.db"
 
+        # Every command targets tmpdir explicitly: running `init` without --dir
+        # initializes Tacit in the current working directory, i.e. inside the
+        # developer's checkout.
         # 1. Test init
-        result = runner.invoke(app, ["init"])
+        result = runner.invoke(app, ["init", "--dir", str(test_dir)])
         assert result.exit_code == 0
         assert "Initialized" in result.output
 
@@ -109,23 +110,26 @@ def test_cli_commands():
             "--type", "decision",
             "--title", "Async DB Sessions",
             "--tags", "db,async",
-            "--impact", "high"
+            "--impact", "high",
+            "--project", str(test_dir),
         ])
         assert result.exit_code == 0
         assert "Recorded" in result.output
 
         # 3. Test search
-        result = runner.invoke(app, ["search", "sessions"])
+        result = runner.invoke(app, ["search", "sessions", "--project", str(test_dir)])
         assert result.exit_code == 0
         assert "Sessi" in result.output or "DECISION" in result.output
 
         # 4. Test recent
-        result = runner.invoke(app, ["recent", "--days", "1"])
+        result = runner.invoke(app, ["recent", "--days", "1", "--project", str(test_dir)])
         assert result.exit_code == 0
 
         # 5. Test export
         export_out = test_dir / "export"
-        result = runner.invoke(app, ["export", "--output", str(export_out)])
+        result = runner.invoke(app, [
+            "export", "--output", str(export_out), "--project", str(test_dir)
+        ])
         assert result.exit_code == 0
         assert "Export Complete" in result.output
         assert (export_out / "INDEX.md").exists()

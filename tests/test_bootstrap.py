@@ -9,14 +9,15 @@ from src.core.bootstrap import (
     BootstrapEngine,
     Features,
     ScoredNode,
-    WEIGHTS,
     IMPACT_SCORES,
-    CENTRALITY_SATURATION_K,
+    IMPACT_FLOOR,
+    RECENCY_FLOOR,
     RECENCY_HALF_LIFE_DAYS,
     PENALTY_MAX,
     PENALTY_HALF_LIFE_DAYS,
     estimate_tokens,
     dominant_tag,
+    parse_timeframe,
 )
 from src.core.memory_node import MemoryNode
 from src.core.storage import MemoryStorage
@@ -45,7 +46,12 @@ def test_dominant_tag():
 
 
 def test_feature_computation_and_scoring_worked_example():
-    """Verify the exact worked example from the bootstrap specification."""
+    """Authority leads; impact and recency may only reorder within its shadow.
+
+    Expected hierarchy: the foundational decision beats a recent medium fix,
+    which beats a recent low-impact note, and a memory whose parent was just
+    superseded is pushed down.
+    """
     now_dt = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
     now_ts = now_dt.timestamp()
 
@@ -101,12 +107,13 @@ def test_feature_computation_and_scoring_worked_example():
         parents=[parent_of_hack],
     )
 
-    desc_counts = {
-        "async_mig": 12,
-        "jwt_readopt": 5,
-        "pool_fix": 2,
-        "typo_note": 0,
-        "hack_node": 0,
+    # PageRank authority: what the graph says about each memory's importance.
+    authority = {
+        "async_mig": 1.00,    # the foundation everything else traces back to
+        "jwt_readopt": 0.55,
+        "pool_fix": 0.30,
+        "typo_note": 0.05,    # leaf, nothing built on it
+        "hack_node": 0.12,    # leaf
     }
 
     superseded_events = {
@@ -122,28 +129,82 @@ def test_feature_computation_and_scoring_worked_example():
     }
 
     # Compute features & scores
-    f1 = BootstrapEngine.compute_node_features(node1, now_ts, desc_counts, superseded_events, neighbor_map)
+    f1 = BootstrapEngine.compute_node_features(node1, now_ts, authority["async_mig"], superseded_events, neighbor_map)
     s1 = BootstrapEngine.score(f1, node1.type)
 
-    f2 = BootstrapEngine.compute_node_features(node2, now_ts, desc_counts, superseded_events, neighbor_map)
+    f2 = BootstrapEngine.compute_node_features(node2, now_ts, authority["jwt_readopt"], superseded_events, neighbor_map)
     s2 = BootstrapEngine.score(f2, node2.type)
 
-    f3 = BootstrapEngine.compute_node_features(node3, now_ts, desc_counts, superseded_events, neighbor_map)
+    f3 = BootstrapEngine.compute_node_features(node3, now_ts, authority["pool_fix"], superseded_events, neighbor_map)
     s3 = BootstrapEngine.score(f3, node3.type)
 
-    f4 = BootstrapEngine.compute_node_features(node4, now_ts, desc_counts, superseded_events, neighbor_map)
+    f4 = BootstrapEngine.compute_node_features(node4, now_ts, authority["typo_note"], superseded_events, neighbor_map)
     s4 = BootstrapEngine.score(f4, node4.type)
 
-    f5 = BootstrapEngine.compute_node_features(node5, now_ts, desc_counts, superseded_events, neighbor_map)
+    f5 = BootstrapEngine.compute_node_features(node5, now_ts, authority["hack_node"], superseded_events, neighbor_map)
     s5 = BootstrapEngine.score(f5, node5.type)
 
-    # Verify score ranking hierarchy: Foundational old nodes outrank recent minor fixes!
-    # s2 and s1 are top tier (~0.67)
-    assert s1 > s3
-    assert s2 > s3
-    assert s3 > s4
-    # The hack with superseded parent gets penalized and sinks below everything
+    # Verify the score ranking hierarchy: high-authority foundations outrank
+    # recent minor fixes, and a memory next to a fresh supersede sinks.
+    assert f1.authority == 1.0
+    assert s1 > s2 > s3 > s4
+    # The hack whose parent was superseded yesterday is pushed below everything
     assert s5 < s4
+
+
+def test_impact_and_recency_cannot_overturn_a_large_authority_gap():
+    """The whole point of authority-first scoring: bounded tie-breakers."""
+    now_ts = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc).timestamp()
+    fresh_low_impact = MemoryNode(
+        id="fresh", content="recent minor note", impact="low", timestamp=now_ts
+    )
+    old_high_impact = MemoryNode(
+        id="old", content="foundational", impact="high",
+        timestamp=now_ts - 365 * 86400,
+    )
+
+    best_case_challenger = BootstrapEngine.score(
+        BootstrapEngine.compute_node_features(fresh_low_impact, now_ts, 0.2, {}, {}),
+        fresh_low_impact.type,
+    )
+    worst_case_foundation = BootstrapEngine.score(
+        BootstrapEngine.compute_node_features(old_high_impact, now_ts, 1.0, {}, {}),
+        old_high_impact.type,
+    )
+
+    assert worst_case_foundation > best_case_challenger
+
+
+def test_multipliers_are_bounded_by_their_floors():
+    """The tie-breakers discount a memory but can never erase its authority."""
+    node = MemoryNode(id="n", content="c", impact="low")
+    ten_years_on = node.timestamp + 3650 * 86400
+    features = BootstrapEngine.compute_node_features(node, ten_years_on, 1.0, {}, {})
+    score = BootstrapEngine.score(features, "decision")
+
+    worst_impact_multiplier = IMPACT_FLOOR + (1.0 - IMPACT_FLOOR) * IMPACT_SCORES["low"]
+    assert features.recency < 0.001
+    assert score == pytest.approx(worst_impact_multiplier * RECENCY_FLOOR, rel=1e-3)
+    assert score > 0.5, "an old, low-impact memory keeps roughly half its authority"
+
+
+def test_parse_timeframe_accepts_names_suffixes_and_dates():
+    now_ts = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc).timestamp()
+
+    assert parse_timeframe("all", now_ts) is None
+    assert parse_timeframe(None, now_ts) is None
+    assert parse_timeframe("", now_ts) is None
+    assert parse_timeframe("nonsense", now_ts) is None, "bad input must not break bootstrapping"
+
+    week = parse_timeframe("week", now_ts)
+    assert now_ts - week == pytest.approx(7 * 86400, rel=1e-6)
+
+    assert now_ts - parse_timeframe("30d", now_ts) == pytest.approx(30 * 86400, rel=1e-6)
+    assert now_ts - parse_timeframe("6h", now_ts) == pytest.approx(6 * 3600, rel=1e-6)
+    assert now_ts - parse_timeframe("2w", now_ts) == pytest.approx(14 * 86400, rel=1e-6)
+
+    cutoff = parse_timeframe("2026-08-01", now_ts)
+    assert datetime.fromtimestamp(cutoff, timezone.utc).date().isoformat() == "2026-08-01"
 
 
 def test_supersedence_and_retraction_filtering(temp_storage):

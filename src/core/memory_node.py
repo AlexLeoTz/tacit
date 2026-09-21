@@ -25,7 +25,8 @@ class MemoryNode:
     title: str = ""
 
     # Classification
-    type: str = "decision"  # decision, command, hack, architecture, error, context
+    # Category slug; the closed set lives in Config.MEMORY_TYPES.
+    type: str = "decision"
     tags: List[str] = field(default_factory=list)
     scope: List[str] = field(default_factory=list)
     impact: str = "medium"  # high, medium, low

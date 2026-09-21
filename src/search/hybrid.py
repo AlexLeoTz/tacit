@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import json
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -14,6 +15,13 @@ RRF_K = 60
 RETRIEVE_K = 50
 SCOPE_BOOST = 0.5
 RECENCY_HALF_LIFE_DAYS = 90
+
+#: How much authority may swing a result, as a multiplier floor. Scores are
+#: ``relevance * (AUTHORITY_FLOOR + (1 - AUTHORITY_FLOOR) * authority)``, so a
+#: foundational memory can at most double its relevance while an obscure one can
+#: be halved — authority modulates relevance instead of overriding it, which is
+#: what keeps a highly-cited but off-topic memory out of the results.
+AUTHORITY_FLOOR = 0.5
 
 LEADINS = [
     "search for",
@@ -32,10 +40,16 @@ def build_embed_text(
     title: Optional[str] = "",
     tags: Optional[Sequence[str]] = None,
     summary: Optional[str] = "",
-    content: Optional[str] = "",
-    max_chars: int = 2000,
 ) -> str:
-    """Compose structured text for document embedding. Tags bridge keyword and conceptual search."""
+    """Compose the text that represents a memory in the vector index.
+
+    Only the title, tags and summary are embedded — never the full content. This
+    keeps a write cheap (~30-60 tokens instead of ~500) and produces a sharper
+    vector, at the cost of making title and summary quality load-bearing. That is
+    why the agent rules require a specific, descriptive title on every entry.
+
+    Tags are included deliberately: they bridge keyword and conceptual search.
+    """
     parts = []
     if title:
         parts.append(title.strip())
@@ -45,8 +59,6 @@ def build_embed_text(
             parts.append(f"Tags: {', '.join(clean_tags)}")
     if summary:
         parts.append(summary.strip())
-    if content:
-        parts.append(content.strip()[:max_chars])
     return "\n".join(parts)
 
 
@@ -154,9 +166,20 @@ def _numpy_bruteforce(
         return []
 
     node_ids = [str(r[0]) for r in rows]
-    blob_bytes = b"".join(r[1] for r in rows)
-    num_nodes = len(rows)
     embed_dim = len(query_vec)
+    expected_bytes = embed_dim * 4
+
+    # Vectors from a different embedding model cannot be compared with this
+    # query. Keep only the rows matching the current dimension: without this,
+    # switching provider (384 -> 768 -> 1536) makes the reshape below throw and
+    # semantic search silently degrades to nothing at all.
+    usable = [(str(r[0]), r[1]) for r in rows if r[1] and len(r[1]) == expected_bytes]
+    if not usable:
+        return []
+
+    node_ids = [node_id for node_id, _ in usable]
+    blob_bytes = b"".join(blob for _, blob in usable)
+    num_nodes = len(usable)
 
     try:
         mat = np.frombuffer(blob_bytes, dtype=np.float32).reshape(num_nodes, embed_dim)
@@ -180,13 +203,46 @@ def rrf(rankings: List[List[str]], k: int = RRF_K) -> Dict[str, float]:
     return dict(scores)
 
 
+def authority_scores(conn) -> Dict[str, float]:
+    """PageRank authority for every active memory, keyed by node id.
+
+    Reads only ``id`` and ``parents`` so the whole project can be scored without
+    materialising ``MemoryNode`` objects for rows that will never be returned.
+    """
+    from ..core.authority import compute_authority_from_pairs
+
+    try:
+        rows = conn.execute(
+            "SELECT id, parents FROM memories WHERE status = 'active' OR status IS NULL"
+        ).fetchall()
+    except Exception:
+        return {}
+
+    pairs = []
+    for row in rows:
+        raw = row[1]
+        try:
+            parents = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            parents = []
+        pairs.append((str(row[0]), parents if isinstance(parents, list) else []))
+
+    try:
+        edges = [dict(edge) for edge in conn.execute("SELECT * FROM edges").fetchall()]
+    except Exception:
+        edges = []
+
+    return compute_authority_from_pairs(pairs, edges)
+
+
 def apply_boosts(
     conn,
     fused: Dict[str, float],
     scope_hint: Optional[List[str]] = None,
     now_ts: Optional[float] = None,
+    authority: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float]]:
-    """Apply scope-matching and recency decay multipliers to fused RRF scores."""
+    """Apply scope, recency and authority multipliers to fused RRF scores."""
     if not fused:
         return []
 
@@ -212,6 +268,12 @@ def apply_boosts(
         # Gentle recency half-life decay (90 days)
         age_days = max(0.0, (now_ts - ts) / 86400.0)
         mult *= math.exp(-math.log(2) * age_days / RECENCY_HALF_LIFE_DAYS)
+
+        # Authority: relevance says "about the query", PageRank says "worth
+        # reading". Neither can rescue the other.
+        if authority:
+            node_authority = authority.get(node_id, 0.0)
+            mult *= AUTHORITY_FLOOR + (1.0 - AUTHORITY_FLOOR) * node_authority
 
         boosted.append((node_id, rrf_score * mult))
 
@@ -281,7 +343,10 @@ class HybridSearchEngine:
             rankings.append(vec_ranked)
 
         fused = rrf(rankings)
-        boosted_pairs = apply_boosts(conn, fused, scope_hint=scope_hint, now_ts=now_ts)[:limit]
+        authority = authority_scores(conn) if fused else {}
+        boosted_pairs = apply_boosts(
+            conn, fused, scope_hint=scope_hint, now_ts=now_ts, authority=authority
+        )[:limit]
 
         # Fetch full nodes
         if not boosted_pairs:

@@ -4,7 +4,24 @@ import json
 from typing import Any, Dict, List, Optional
 
 from ..core.storage import MemoryStorage
+from ..utils.config import Config
 from .handlers import MemoryMCPHandlers
+
+#: Generated from the single taxonomy definition so the tool description the
+#: model actually reads can never drift from ``Config.MEMORY_TYPES``.
+_MEMORY_TYPE_HINT = ", ".join(Config.MEMORY_TYPES)
+_ADD_MEMORY_DESCRIPTION = (
+    "Add a persistent memory entry to the current workspace. "
+    f"`type` is one of: {_MEMORY_TYPE_HINT}. "
+    "`title` is REQUIRED and must be a specific, self-contained phrase naming the "
+    "subject (e.g. 'Replaced Redis sessions with signed JWT cookies'). Only the "
+    "title, tags and summary are embedded into the vector index, so a vague title "
+    "makes the memory unfindable by semantic search. "
+    "CONTENT REQUIREMENT: provide a comprehensive, self-contained Markdown explanation with "
+    "technical rationale, alternatives considered, root causes, or trade-offs. Do NOT write "
+    "shallow 2-3 line summaries in content. If replacing an outdated decision or hack, pass "
+    "supersedes=['<previous-node-id>']."
+)
 
 
 def create_mcp_server(storage: Optional[MemoryStorage] = None):
@@ -14,10 +31,10 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
     mcp = FastMCP("tacit")
     handlers = MemoryMCPHandlers(storage)
 
-    @mcp.tool()
+    @mcp.tool(description=_ADD_MEMORY_DESCRIPTION)
     def memory_add(
         content: str,
-        type: str = "decision",
+        type: str = Config.DEFAULT_MEMORY_TYPE,
         summary: str = "",
         title: str = "",
         tags: Optional[List[str]] = None,
@@ -29,12 +46,7 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         author: str = "ai-agent",
         relation_note: Optional[str] = None,
     ) -> str:
-        """Add a persistent memory entry (decision, command, hack, architecture, error, context) to current workspace.
-
-        CONTENT REQUIREMENT: Provide a comprehensive, self-contained Markdown explanation with technical rationale,
-        alternatives considered, root causes, or trade-offs. Do NOT write shallow 2-3 line summaries in content.
-        If replacing an outdated decision or hack, pass `supersedes=['<previous-node-id>']`.
-        """
+        """Add a persistent memory entry to the current workspace."""
         res = handlers.handle_memory_add(
             content=content,
             type=type,
@@ -99,13 +111,21 @@ def create_mcp_server(storage: Optional[MemoryStorage] = None):
         res = handlers.handle_memory_recent(days=days, limit=limit)
         return res.get("formatted") or json.dumps(res, indent=2)
 
-    @mcp.tool()
+    @mcp.tool(description=(
+        "Generate a token-budgeted project briefing ranked by PageRank authority "
+        "(how many later memories trace back to it), with impact and recency as "
+        "bounded tie-breakers. Call this at the start of a session to load "
+        "institutional context. `timeframe` may be 'all' or a window such as "
+        "'week', '30d', '6h' or an ISO date, which filters which memories appear "
+        "while ranking still uses the whole graph. `scope_hint` takes the file "
+        "paths you are working on and boosts matching memories."
+    ))
     def memory_context(
         timeframe: str = "all",
         budget: Optional[int] = None,
         scope_hint: Optional[List[str]] = None,
     ) -> str:
-        """Generate a relevance-ranked, token-budgeted project briefing based on DAG centrality, impact, and recency decay."""
+        """Generate a relevance-ranked, token-budgeted project briefing."""
         res = handlers.handle_memory_context(
             timeframe=timeframe,
             budget=budget,

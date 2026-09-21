@@ -1,8 +1,19 @@
-from setuptools import setup, find_packages
+import re
+from pathlib import Path
+
+from setuptools import find_packages, setup
+
+#: Single source of truth for the version — keep it in ``src/__init__.py`` only,
+#: so the update banner (`Config.check_for_updates`) and the installed package
+#: can never disagree.
+_INIT = Path(__file__).parent / "src" / "__init__.py"
+_VERSION = re.search(
+    r'^__version__\s*=\s*["\']([^"\']+)["\']', _INIT.read_text(encoding="utf-8"), re.MULTILINE
+).group(1)
 
 setup(
     name="tacit",
-    version="0.1.0",
+    version=_VERSION,
     description="Persistent, immutable project memory and tacit knowledge layer for AI coding agents",
     author="Tacit Contributors",
     packages=find_packages(),

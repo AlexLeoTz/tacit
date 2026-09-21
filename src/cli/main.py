@@ -11,16 +11,20 @@ import uuid
 import yaml
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 import typer
 
+from .. import __version__
+from ..core.agent_rules import AGENT_RULE_CONTENT
 from ..core.memory_node import MemoryNode
 from ..core.storage import MemoryStorage
 from ..export.markdown_exporter import MarkdownExporter
 from ..export.preview_server import MarkdownPreviewServer
 from ..mcp.server import MemoryMCPServer
+from ..utils import updater
 from ..utils.config import Config
 
 app = typer.Typer(
@@ -31,8 +35,60 @@ app = typer.Typer(
 console = Console()
 
 
+def _make_output_encoding_safe() -> None:
+    """Stop Rich from crashing on box-drawing characters in a legacy console.
+
+    `tacit briefing` renders a `════` header. On a Windows console using a legacy
+    code page (cp1252) that string cannot be encoded, so printing a briefing
+    raised UnicodeEncodeError instead of showing it. Replacing unencodable
+    characters is strictly better than refusing to print.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
+def _esc(value: object) -> str:
+    """Escape dynamic text for Rich markup.
+
+    Memory types and agent-written titles routinely contain square brackets —
+    `[decision]`, `[WinError 32] …` — which Rich otherwise parses as style tags
+    and silently deletes from the output.
+    """
+    return escape(str(value))
+
+
+_make_output_encoding_safe()
+
+
+def _version_callback(value: bool) -> None:
+    """Handle the eager ``--version`` flag (referenced by `tacit update` and the docs)."""
+    if value:
+        console.print(f"[bold cyan]tacit[/bold cyan] [green]{__version__}[/green]")
+        # Where the code actually came from: an editable install pins the CLI to
+        # the directory it was installed from, so this is the fastest way to
+        # notice that an unrelated clone is being executed instead.
+        console.print(f"[dim]{updater.package_parent_dir()}[/dim]")
+        raise typer.Exit()
+
+
 @app.callback()
-def main_callback(ctx: typer.Context):
+def main_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the Tacit version and exit.",
+    ),
+):
     """Global callback executed before any CLI command."""
     # Don't show update banner if developer is already running `tacit update` or `tacit mcp`
     if ctx.invoked_subcommand not in ("update", "mcp"):
@@ -82,62 +138,7 @@ def init(
     count = storage.get_count()
 
     # Automatically generate agent rules for Antigravity, Cursor, and Claude
-    rule_content = """# Autonomous Institutional Memory Rules (Tacit)
-
-You are connected to Tacit to preserve engineering decisions across chat resets.
-
-## What Tacit Stores vs What NOT to Store:
-* **ONLY Store Distilled Tacit Knowledge**: Record non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
-* **NEVER Store Chat History, Logs, or Code Snippets**: Do not pollute the memory database with conversation transcripts, raw terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
-
-## Rigorous Content Detail Requirements:
-* **NEVER write shallow 1-3 line entries in `content`**: The `summary` is a 1-sentence abstract, but `content` MUST be a rich, comprehensive, self-contained Markdown write-up that fully equips future agents and developers without requiring follow-up questions:
-  * **For `decision` / `architecture`**:
-    1. **Context & Problem Statement**: What problem was being solved or what motivated this decision?
-    2. **Alternatives Evaluated & Rejected**: What alternative approaches were considered, and specifically why were they rejected?
-    3. **Technical Solution & Rationale**: The concrete architectural pattern, data flow, or configuration applied.
-    4. **Trade-offs & Operational Consequences**: Negative side effects, performance implications, maintenance overhead, or future migration obligations.
-    5. **Validation & Verification**: How the implementation was verified and tested.
-  * **For `error`**:
-    1. **Symptom & Trigger Condition**: Exact error messages, stack traces, and environment conditions that triggered the failure.
-    2. **Root Cause Analysis**: Why the bug occurred at the code, compiler, runtime, or dependency level.
-    3. **Resolution / Applied Fix**: Precise code or configuration changes that eliminated the failure.
-    4. **Prevention & Regression Caveats**: Edge cases or anti-patterns to avoid in future development.
-  * **For `hack` (Workaround)**:
-    1. **Workaround Description**: Detailed explanation of the temporary workaround.
-    2. **Why Standard Approach Failed**: The upstream bug, library limitation, or environment barrier.
-    3. **Side Effects & Risks**: Known performance penalties or technical debt introduced.
-    4. **Decommissioning Criteria**: Specific conditions, upstream releases, or milestones required to remove the hack.
-  * **For `command`**:
-    1. **Exact Command Syntax**: Complete CLI invocation, required flags, and directory execution context.
-    2. **Prerequisites & Side Effects**: Database migrations, lock acquisitions, or daemon states impacted.
-    3. **When to Run vs When NOT to Run**: Critical operational guardrails.
-
-## Multi-Entry Recording (Paired Issues & Decisions):
-* When you diagnose an issue and implement a fix or architectural change, you should record **BOTH**:
-  1. The `error` node (documenting the failure symptom and root cause).
-  2. The `decision` or `hack` node (documenting the architectural fix or workaround).
-* **Use `memory_add_batch`** to insert multiple related entries in a single call. You can reference previous items in the batch using `$prev` or `$0` in the `parents` field to link them into the causal graph automatically.
-
-## Preventing Orphan Nodes & Causal Graph Integrity:
-* **NEVER Create Orphan Nodes Blindly**: Unless you are creating a completely new, greenfield feature or root architecture, every `decision`, `hack`, `command`, or `error` is derived from, fixes, or relates to an existing component or prior memory.
-* **Always Check for Existing Parents First**: Check `memory_context()` or `memory_search()` to identify relevant parent UUIDs before calling `memory_add`.
-* **Heed Interactive Warnings**: If `memory_add` responds with a `[TACIT GRAPH NOTICE]` suggesting candidate parents, immediately review them and call `memory_link(child_id=..., parent_id=...)` to preserve graph lineage.
-
-## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
-2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.
-3. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
-   - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
-   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths actually exist in the codebase.
-   - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
-   - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
-4. **End-of-Task Checkpoint (Autonomous Self-Reflection)**:
-   - At the conclusion of any non-trivial coding task, ask yourself:
-     "Did I solve a non-trivial error, make an architectural choice, apply an undocumented workaround, or execute a vital operational command?"
-   - If YES, record rich entries using `memory_add` or `memory_add_batch`. If invalidating a past decision, specify `supersedes=[<id>]`.
-   - If NO (e.g., routine refactor, styling tweak, or typo fix), do not pollute project memory.
-"""
+    rule_content = AGENT_RULE_CONTENT
     # 1. Antigravity rule
     agy_rule = target_root / ".agents" / "rules" / "tacit.md"
     agy_rule.parent.mkdir(parents=True, exist_ok=True)
@@ -195,7 +196,12 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 @app.command()
 def remember(
     content: str = typer.Argument(..., help="Detailed content of the memory entry"),
-    type: str = typer.Option("decision", "--type", "-t", help="Memory type (decision, command, hack, architecture, error, context)"),
+    type: str = typer.Option(
+        Config.DEFAULT_MEMORY_TYPE,
+        "--type",
+        "-t",
+        help=f"Memory category. One of: {', '.join(Config.MEMORY_TYPES)}",
+    ),
     summary: str = typer.Option("", "--summary", "-s", help="Concise summary (auto-generated if omitted)"),
     title: str = typer.Option("", "--title", help="Title for the memory node"),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags (e.g. 'auth,jwt,security')"),
@@ -294,10 +300,10 @@ def search(
         status_flag = f" [{node.status.upper()}]" if node.status != "active" else ""
         table.add_row(
             date_str,
-            f"[{node.type}]{status_flag}",
+            _esc(f"[{node.type}]{status_flag}"),
             f"{score:.3f}",
-            node.title or node.summary,
-            tags_str,
+            _esc(node.title or node.summary),
+            _esc(tags_str),
             node.id[:8],
         )
 
@@ -307,16 +313,47 @@ def search(
 @app.command()
 def reindex(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Rebuild every vector, required after switching embedding provider",
+    ),
 ):
     """Backfill missing dense vector embeddings across all memories in the project database."""
+    from ..search.embeddings import EmbeddingService
+
     storage = get_storage(project)
+    embed_svc = EmbeddingService.get()
+    console.print(f"[dim]Embedding provider:[/dim] {embed_svc.describe()}")
+
+    if not embed_svc.available:
+        console.print(Panel.fit(
+            "[bold red]No embedding provider available[/bold red]\n\n"
+            "Semantic search is disabled; queries fall back to keyword matching only.\n\n"
+            "Set [bold cyan]OPENAI_API_KEY[/bold cyan] or [bold cyan]GEMINI_API_KEY[/bold cyan], "
+            "or install the offline model with [bold]pip install fastembed[/bold].",
+            border_style="red",
+        ))
+        raise typer.Exit(code=1)
+
+    stale = storage.count_stale_embeddings()
+    if stale and not force:
+        console.print(Panel.fit(
+            f"[yellow]{stale} memories were embedded with a different model.[/yellow]\n"
+            "Their vectors cannot be compared with the current provider, so they are\n"
+            "skipped by semantic search. Rebuild them with:\n\n"
+            "[bold cyan]tacit reindex --force[/bold cyan]",
+            border_style="yellow",
+        ))
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Embedding memory entries via fastembed (ONNX)...", total=None)
-        done, total = storage.reindex_all(progress=False)
+        task = progress.add_task(f"Embedding memory entries via {embed_svc.provider}...", total=None)
+        done, total = storage.reindex_all(progress=False, force=force)
         progress.advance(task)
 
     if total == 0:
@@ -382,8 +419,8 @@ def recent(
         date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
         table.add_row(
             date_str,
-            f"[{node.type}]",
-            node.title or node.summary,
+            _esc(f"[{node.type}]"),
+            _esc(node.title or node.summary),
             node.id[:8],
         )
 
@@ -475,21 +512,21 @@ def lineage(
     ancestors = [dag.get_node(aid) for aid in dag.get_ancestors(target_node.id) if dag.get_node(aid)]
     descendants = [dag.get_node(did) for did in dag.get_descendants(target_node.id) if dag.get_node(did)]
 
-    lines = [f"[bold cyan]Causal Lineage for:[/bold cyan] {target_node.title or target_node.summary} [dim]({target_node.id[:8]})[/dim]\n"]
+    lines = [f"[bold cyan]Causal Lineage for:[/bold cyan] {_esc(target_node.title or target_node.summary)} [dim]({target_node.id[:8]})[/dim]\n"]
 
     if ancestors:
         lines.append("[bold yellow]Ancestors (Causal Foundations):[/bold yellow]")
         for a in sorted(ancestors, key=lambda x: x.timestamp):
-            lines.append(f"  └── [{a.type}] {a.title or a.summary} [dim]({a.id[:8]})[/dim]")
+            lines.append(f"  └── {_esc(f'[{a.type}]')} {_esc(a.title or a.summary)} [dim]({a.id[:8]})[/dim]")
     else:
         lines.append("[dim]No ancestor nodes (Root Decision)[/dim]")
 
-    lines.append(f"\n[bold green]► Target Node:[/bold green] [{target_node.type}] {target_node.title or target_node.summary} [dim]({target_node.id})[/dim]")
+    lines.append(f"\n[bold green]► Target Node:[/bold green] {_esc(f'[{target_node.type}]')} {_esc(target_node.title or target_node.summary)} [dim]({target_node.id})[/dim]")
 
     if descendants:
         lines.append("\n[bold magenta]Descendants (Derived Decisions/Hacks):[/bold magenta]")
         for d in sorted(descendants, key=lambda x: x.timestamp):
-            lines.append(f"  └── [{d.type}] {d.title or d.summary} [dim]({d.id[:8]})[/dim]")
+            lines.append(f"  └── {_esc(f'[{d.type}]')} {_esc(d.title or d.summary)} [dim]({d.id[:8]})[/dim]")
     else:
         lines.append("[dim]No downstream descendants yet[/dim]")
 
@@ -653,7 +690,7 @@ def delete(
             console.print(f"[red]Memory entry '{node_id}' not found.[/red]")
             return
 
-    console.print(f"[yellow]Target Memory:[/yellow] [{node.type}] {node.summary} ([dim]{node.id}[/dim])")
+    console.print(f"[yellow]Target Memory:[/yellow] {_esc(f'[{node.type}]')} {_esc(node.summary)} ([dim]{node.id}[/dim])")
 
     if not yes:
         confirm = typer.confirm("Are you sure you want to permanently delete this memory node?")
@@ -697,22 +734,36 @@ def clear(
 @app.command(name="briefing")
 def briefing_cmd(
     budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
+    timeframe: str = typer.Option(
+        "all",
+        "--timeframe",
+        "-t",
+        help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
+    ),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Generate intelligent relevance-ranked project briefing for agent bootstrapping."""
     from ..core.bootstrap import BootstrapEngine
     storage = get_storage(project)
-    res = BootstrapEngine.generate_briefing(storage=storage, budget=budget)
-    console.print(res.get("formatted", ""))
+    res = BootstrapEngine.generate_briefing(storage=storage, budget=budget, timeframe=timeframe)
+    # The briefing is pre-rendered plain text: markup=False keeps bracketed titles
+    # like "[WinError 32] ..." from being parsed as Rich style tags.
+    console.print(res.get("formatted", ""), markup=False)
 
 
 @app.command(name="context")
 def context_cmd(
     budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
+    timeframe: str = typer.Option(
+        "all",
+        "--timeframe",
+        "-t",
+        help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
+    ),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
 ):
     """Alias for 'briefing' — generate relevance-ranked project briefing for agent bootstrapping."""
-    briefing_cmd(budget=budget, project=project)
+    briefing_cmd(budget=budget, timeframe=timeframe, project=project)
 
 
 @app.command()
@@ -920,180 +971,187 @@ def install_mcp(
         console.print(json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2))
 
 
+def _is_editable_install() -> bool:
+    """True when Tacit was installed with ``pip install -e`` (a development clone)."""
+    import sysconfig
+
+    try:
+        from importlib.metadata import distribution
+
+        raw = distribution("tacit").read_text("direct_url.json")
+        if raw:
+            return bool(json.loads(raw).get("dir_info", {}).get("editable"))
+    except Exception:
+        pass
+    try:
+        site = Path(sysconfig.get_path("purelib") or "")
+        if site.is_dir():
+            if any(site.glob("__editable__*tacit*.pth")) or (site / "tacit.egg-link").exists():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _local_source_root() -> Optional[Path]:
+    """Locate the source checkout backing this installation, when there is one."""
+    candidate = updater.package_parent_dir()
+    if (candidate / "setup.py").exists() or (candidate / "pyproject.toml").exists():
+        return candidate
+    try:
+        root = Config.find_project_root()
+        if (root / "setup.py").exists() and (root / ".git").exists():
+            return root
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_update_mode(force_source: bool) -> tuple[bool, Optional[Path]]:
+    """Decide between reinstalling from the Git URL and updating the local checkout.
+
+    Reinstalling from Git over an editable install is what produced the
+    ``~acit-0.1.0.dist-info`` debris in site-packages, so an editable install is
+    always updated in place instead.
+    """
+    dev_env = os.environ.get("TACIT_DEV_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+    source_root = _local_source_root()
+    editable = bool(source_root) and (force_source or dev_env or _is_editable_install())
+    return editable, (source_root if editable else None)
+
+
 @app.command()
 def update(
-    git_url: str = typer.Option("https://github.com/AlexLeoTz/tacit.git", "--url", help="Git repository URL to update from"),
+    git_url: str = typer.Option(
+        updater.DEFAULT_GIT_URL, "--url", help="Git repository URL to update from"
+    ),
+    source: bool = typer.Option(
+        False,
+        "--source",
+        help="Update the local source checkout (git pull + editable install) instead of the Git URL",
+    ),
+    reinit: bool = typer.Option(
+        True,
+        "--reinit/--no-reinit",
+        help="Refresh workspace agent rules once the update finishes",
+    ),
 ):
-    """Update Tacit globally to the latest version from GitHub and refresh project rules in the current directory."""
-    import os
+    """Update Tacit to the latest version and refresh project rules in the current directory."""
     import platform
-    import subprocess
-    import sys
-    import time
 
-    console.print("[cyan]Updating Tacit globally...[/cyan]")
-    pip_target = f"git+{git_url}"
-    current_sys = platform.system().lower()
+    console.print("[cyan]Updating Tacit...[/cyan]")
 
-    # On Windows, running tacit.exe processes lock python executable scripts and .exe wrappers.
-    # Automatically terminate any background tacit serve/mcp instances (except current PID) so pip won't get PermissionError
+    # The update runs detached on Windows, so a failure there is otherwise silent.
+    previous = updater.read_status()
+    if previous and previous.get("ok") is False:
+        console.print(
+            Panel.fit(
+                "[yellow]The previous update did not finish cleanly.[/yellow]\n"
+                f"[dim]Log:[/dim] {updater.update_log_path()}\n"
+                f"[dim]Target:[/dim] {previous.get('target')}\n"
+                f"[dim]Reason:[/dim] {str(previous.get('error') or 'see log')[:400]}",
+                border_style="yellow",
+            )
+        )
+
+    foreign_checkout = updater.find_foreign_checkout(Path.cwd())
+    if foreign_checkout:
+        console.print(
+            Panel.fit(
+                "[yellow]This is not the checkout the installed command runs.[/yellow]\n\n"
+                f"[dim]Running from:[/dim] {updater.package_parent_dir()}\n"
+                f"[dim]This directory:[/dim] {foreign_checkout}\n\n"
+                "An editable install stays pinned to the directory it was installed from, so\n"
+                "the checkout above is the one being updated. To switch to this one, run\n"
+                "[bold cyan]pip install -e .[/bold cyan] from it first.",
+                border_style="yellow",
+            )
+        )
+
+    editable, source_root = _resolve_update_mode(source)
+    target = str(source_root) if editable else f"git+{git_url}"
+    spec = {
+        "python": updater.real_python_executable(),
+        "package_parent": str(updater.package_parent_dir()),
+        "parent_pid": os.getpid(),
+        "cwd": str(Path.cwd()),
+        "git_url": git_url,
+        "target": target,
+        "editable": editable,
+        "source_root": str(source_root) if source_root else None,
+        "reinit": reinit,
+        "log": str(updater.update_log_path()),
+        "status": str(updater.update_status_path()),
+        "attempts": 3,
+    }
+
+    if editable:
+        console.print(f"[dim]Source checkout detected:[/dim] {source_root}")
+        console.print("[dim]Updating in editable mode (git pull + pip install -e).[/dim]")
+
+    # ------------------------------------------------------------------
+    # Windows: a running tacit.exe cannot be replaced in place, so the work
+    # is handed to a detached updater that outlives this process.
+    # ------------------------------------------------------------------
     if platform.system().lower() == "windows":
-        current_pid = os.getpid()
-    # ------------------------------------------------------------------
-    # Windows: We cannot overwrite tacit.exe while it is running.
-    # Strategy: write a .bat updater, launch it DETACHED (so it outlives
-    # this process), then exit immediately so the file lock is released.
-    # ------------------------------------------------------------------
-    if current_sys == "windows":
-        import tempfile
-
-        python_exe = sys.executable.replace("\\", "\\\\")
-        pip_target_escaped = pip_target.replace("\\", "\\\\")
-
-        # Clean up corrupt ~* dist-info dirs that block reinstalls
-        # (these are left behind by previously interrupted pip installs)
-        site_packages = None
         try:
-            # Terminate background tacit.exe instances
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "tacit.exe", "/FI", f"PID ne {current_pid}"],
-                capture_output=True,
-                check=False,
-            )
-            time.sleep(0.5)
-            import sysconfig
-            site_packages = sysconfig.get_path("purelib").replace("\\", "\\\\")
-        except Exception:
-            pass
-
-        cleanup_lines = ""
-        if site_packages:
-            cleanup_lines = (
-                f'for /D %%d in ("{site_packages}\\~*") do rmdir /S /Q "%%d"\r\n'
-            )
-
-        bat_lines = [
-            "@echo off",
-            "echo Tacit updater running in background...",
-            "timeout /T 2 /NOBREAK > nul",  # wait for parent tacit.exe to exit
-            cleanup_lines.strip(),           # remove corrupt ~* dirs
-            f'"{python_exe}" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps "{pip_target_escaped}"',
-            "if %ERRORLEVEL% NEQ 0 (",
-            f'    echo [WARN] pip install failed, retrying with --user flag...',
-            f'    "{python_exe}" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps --user "{pip_target_escaped}"',
-            ")",
-            f'"{python_exe}" -m src.cli.main init --force 2>nul || tacit init --force 2>nul',
-            "echo Tacit update complete.",
-        ]
-        bat_content = "\r\n".join(l for l in bat_lines if l.strip()) + "\r\n"
-
-        try:
-            fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="tacit_update_")
-            os.close(fd)
-            with open(bat_path, "w", encoding="utf-8") as f:
-                f.write(bat_content)
-
-            # DETACHED_PROCESS (0x08) + CREATE_NO_WINDOW (0x08000000)
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NO_WINDOW = 0x08000000
-            subprocess.Popen(
-                ["cmd.exe", "/C", bat_path],
-                creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-                close_fds=True,
-            )
-        except Exception as e:
-            console.print(f"[red]Failed to launch background updater: {e}[/red]")
+            updater.launch_detached_windows_updater(spec)
+        except Exception as exc:
+            console.print(f"[bold red]Failed to launch the background updater: {exc}[/bold red]")
             console.print("[yellow]Manual fix:[/yellow]")
-            console.print(f"  1. Close all tacit.exe processes")
-            console.print(f"  2. Run: pip install --upgrade --force-reinstall --no-cache-dir --no-deps {pip_target}")
-            return
+            console.print("  1. Close every editor running the Tacit MCP server")
+            console.print(
+                "  2. Run: pip install --upgrade --force-reinstall --no-cache-dir --no-deps "
+                + target
+            )
+            raise typer.Exit(code=1)
 
-        console.print(Panel.fit(
-            "[bold green]Tacit Update Launched![/bold green]\n"
-            "[cyan]A background updater is now running.[/cyan]\n\n"
-            "[dim]It will install the latest version from GitHub and refresh workspace rules.[/dim]\n"
-            "[dim]You can reopen your terminal in ~10 seconds and run `tacit --version` to confirm.[/dim]",
-            border_style="green",
-        ))
-        # Exit the current process so tacit.exe releases its file lock
+        console.print(
+            Panel.fit(
+                "[bold green]Tacit update started in the background.[/bold green]\n"
+                "[dim]It waits for this process to exit, stops leftover Tacit daemons,[/dim]\n"
+                "[dim]then reinstalls and refreshes your workspace rules.[/dim]\n\n"
+                f"[dim]Log:[/dim] {updater.update_log_path()}\n"
+                "[dim]Verify with:[/dim] [bold cyan]tacit --version[/bold cyan]",
+                border_style="green",
+            )
+        )
         raise typer.Exit(code=0)
 
     # ------------------------------------------------------------------
-    # Unix / macOS: safe to run pip directly in the same process.
-    # Kill other background tacit instances first to avoid conflicts.
+    # Unix / macOS: safe to run pip in the current process.
     # ------------------------------------------------------------------
-    current_pid = os.getpid()
-    try:
-        subprocess.run(
-            ["pkill", "-f", "tacit"],
-            capture_output=True,
-            check=False,
-        )
-        time.sleep(0.3)
-    except Exception:
-        pass
+    killed = updater.terminate_unix_daemons(exclude_pids={os.getpid()})
+    if killed:
+        console.print(f"[dim]Stopped background Tacit daemons: {killed}[/dim]")
+    updater.clean_tacit_debris()
 
-    current_root = Config.find_project_root()
-    is_local_dev = (current_root / "setup.py").exists() and (current_root / ".git").exists()
-    # Only treat as local-dev if the env var is explicitly set, preventing
-    # accidental editable-mode installs when running from inside the repo.
-    is_local_dev = (
-        os.environ.get("TACIT_DEV_MODE", "").lower() in ("1", "true", "yes")
-        and (current_root / "setup.py").exists()
-        and (current_root / ".git").exists()
+    result = updater.perform_update(
+        spec, log=lambda message: console.print(f"[dim]{message}[/dim]")
     )
 
-    try:
-        if is_local_dev:
-            console.print("[yellow]Local development clone detected. Upgrading via git pull and editable install...[/yellow]")
-            console.print("[yellow]Local dev mode detected. Running git pull + editable install...[/yellow]")
-            try:
-                git_pull = subprocess.run(["git", "pull"], cwd=current_root, capture_output=True, text=True, check=False)
-                if git_pull.returncode != 0:
-                    console.print(f"[yellow]Warning: git pull failed: {git_pull.stderr.strip()}[/yellow]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not run git pull: {e}[/yellow]")
+    updater.write_status({**result, "target": target})
 
-            # Use --no-deps and --no-build-isolation to avoid binary re-creation conflicts
-            cmd = [sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."]
-            result = subprocess.run(cmd, cwd=current_root, capture_output=True, text=True, check=False)
-        else:
-            # Update the global python package via pip with force-reinstall and no-cache-dir
-            cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-cache-dir", "--no-deps", pip_target]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.get("ok"):
+        console.print(
+            Panel.fit(
+                "[bold green]Tacit successfully updated.[/bold green]\n"
+                f"[dim]Version:[/dim] {result.get('version') or __version__}\n"
+                f"[dim]Source:[/dim] {target}",
+                border_style="green",
+            )
+        )
+        return
 
-        if result.returncode != 0:
-            if is_local_dev or (current_root / "setup.py").exists():
-                console.print("[yellow]Retrying upgrade via editable mode...[/yellow]")
-                result = subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."], cwd=current_root, capture_output=True, text=True, check=False)
-            console.print(f"[red]Update failed: {result.stderr}[/red]")
-            return
-
-            if result.returncode != 0:
-                console.print(f"[red]Update failed: {result.stderr}[/red]")
-                return
-
-        # Refresh rules in current workspace using a fresh process of the newly updated code
-        # Refresh rules in current workspace
-        console.print("[cyan]Refreshing local workspace agent rules...[/cyan]")
-        try:
-            subprocess.run([sys.executable, "-m", "src.cli.main", "init", "--force"], check=False)
-        except Exception:
-            try:
-                subprocess.run(["tacit", "init", "--force"], check=False)
-            except Exception:
-                pass
-
-        console.print(Panel.fit(
-            f"[bold green]Tacit Successfully Updated![/bold green]\n"
-            f"[dim]Version Source:[/dim] {git_url}\n"
-            f"[dim]Active Project:[/dim] {current_root.resolve()}\n\n"
-            f"[cyan]Global 'tacit' CLI and local workspace rules are up to date.[/cyan]",
-            border_style="green",
-        ))
-
-    except Exception as e:
-        console.print(f"[bold red]Failed to update Tacit: {e}[/bold red]")
+    console.print(
+        Panel.fit(
+            "[bold red]Update failed.[/bold red]\n"
+            f"[dim]Source:[/dim] {target}\n\n"
+            f"{str(result.get('error') or 'see output above')[:600]}",
+            border_style="red",
+        )
+    )
+    raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

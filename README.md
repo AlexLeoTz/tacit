@@ -72,11 +72,16 @@ Tacit provides a local institutional memory layer for AI coding tools. At the st
 ### Core Mechanics
 
 #### 1. Instant Session Bootstrapping (`memory_context()`)
-At the start of every session, your AI agent calls `memory_context()` to load an intelligent, token-budgeted project briefing. Instead of naive date filters, Tacit ranks decisions using a multi-signal scoring curve:
-$$\text{Score}(d) = 0.35 \cdot \text{Impact}(d) + 0.40 \cdot \text{Centrality}(d) + 0.25 \cdot \text{Recency}(d) - \text{Penalty}(d)$$
-* **DAG Centrality**: Foundational decisions that later choices depend on are amplified ($f_{\text{centrality}} = \frac{n}{n + 8}$).
-* **Recency Decay**: A 6-month half-life curve keeps advice fresh without dropping core principles ($f_{\text{recency}} = 0.5^{(\text{days} / 180)}$).
+At the start of every session, your AI agent calls `memory_context()` to load an intelligent, token-budgeted project briefing. Memories are ranked by **PageRank authority** over the causal graph — the same backlink intuition that ranks web pages:
+
+$$\text{Authority}(d) = \text{PageRank over } child \rightarrow parent \text{ links} \qquad \text{Score}(d) = \text{Authority}(d) \times \text{Impact}(d) \times \text{Recency}(d) - \text{Penalty}(d)$$
+
+* **Authority leads**: a memory that many later memories trace back to outranks a fresh one nobody built on. A backlink from a foundational decision is worth more than one from a throwaway note.
+* **Bounded tie-breakers**: impact and recency are multipliers confined to `[0.6, 1.0]` and `[0.7, 1.0]`, so together they can reorder comparable memories but can never overturn a decisive authority gap.
+* **Supersede penalty**: a memory sitting next to a recently corrected one is pushed down, and the deduction fades over ~2 months.
 * **Token Budgeting**: Assembles the top context into **Tier 1 (deep reading with lineage)** and **Tier 2 (one-liner summaries by tag)** within your configured token budget (`TACIT_TOKEN_BUDGET`).
+
+Pass `timeframe` (`week`, `30d`, an ISO date, …) to restrict *which* memories may appear. Authority is always computed over the whole active graph — ranking only within a recent window would leave a handful of memories with almost no links between them, where every score is identical.
 
 #### 2. Causal DAG and The "REPLACED" Sticker System
 Engineering history is immutable; you should never erase past lessons. When an architectural choice changes, Tacit attaches a typed **`supersedes`** edge to the old entry pointing to the new one, explaining *why* it was replaced. 
@@ -85,16 +90,19 @@ Engineering history is immutable; you should never erase past lessons. When an a
 * The complete causal ancestry (`derives_from` and `supersedes`) remains inspectable.
 
 #### 3. Autonomous End-of-Task Reflection
-Tacit turns your AI coding tool into an active collaborator in memory hygiene. At the end of every non-trivial coding task, the agent automatically checks:
-> *"Did I make a non-obvious design choice, apply an undocumented workaround, solve a tricky error, or execute a deployment command?"*
-If **yes**, it records distilled tacit knowledge into `.tacit/` (linking parents and superseded IDs). If **no**, it leaves the database clean.
+Tacit turns your AI coding tool into an active collaborator in memory hygiene. Every task that changes the codebase ends with a mandatory checkpoint that classifies the knowledge into a closed taxonomy, documents what changed in the code, states how it was verified, and links the causal graph. Only genuinely behaviour-free changes (formatting, comment or typo fixes) are exempt.
 
-#### 4. Hybrid Search Engine (Gemini API & FastEmbed ONNX + BM25)
-Combines exact lexical keyword matching (SQLite FTS5 / BM25) with dense semantic embeddings using **Reciprocal Rank Fusion (RRF)**:
-$$\text{RRF}(d) = \sum_{r \in \text{channels}} \frac{1}{60 + \text{rank}_r(d)}$$
-* **Tier 1 (High-Precision Remote)**: Provide `GEMINI_API_KEY` to leverage Google's `text-embedding-004` (768-dim) dense vector embeddings.
-* **Tier 2 (Zero-Config Local CPU)**: If no key is set or offline, Tacit automatically falls back to local fastembed ONNX (`bge-small-en-v1.5`, ~50MB runtime, <5ms latency).
-* Exact symbols, flags, and error codes are protected by BM25 exact matching.
+#### 4. Hybrid Search Engine (BM25 + Embeddings, ranked by Authority)
+Combines exact lexical keyword matching (SQLite FTS5 / BM25) with dense semantic embeddings using **Reciprocal Rank Fusion (RRF)**, then multiplies by the same PageRank authority used for briefings:
+
+$$\text{RRF}(d) = \sum_{r \in \text{channels}} \frac{1}{60 + \text{rank}_r(d)} \qquad \text{Score}(d) = \text{RRF}(d) \times \text{Scope} \times \text{Recency} \times \bigl(0.5 + 0.5 \cdot \text{Authority}(d)\bigr)$$
+
+Relevance says *"about the query"*; authority says *"worth reading"*. Because they multiply, neither can rescue the other — a highly-cited but off-topic memory cannot surface for an unrelated query.
+
+* **Embedding providers are pluggable**: `OPENAI_API_KEY` (`text-embedding-3-small`, 1536-dim) → `GEMINI_API_KEY` (`gemini-embedding-001`, 768-dim) → local fastembed ONNX (`bge-small-en-v1.5`, 384-dim, offline and zero-config).
+* **Only titles, tags and summaries are embedded** — never the full content. That makes a write roughly 10× cheaper and produces a sharper vector, but it also means the title is the search index. The agent rules require a specific, self-descriptive title on every entry.
+* **Exact symbols, flags, and error codes** are protected by BM25 exact matching.
+* **Switching providers requires `tacit reindex --force`**: vectors from different models are not comparable, and Tacit will tell you when stored vectors no longer match the active provider rather than silently returning nothing.
 
 #### 5. Multi-Tier Candidate Auto-Linking & Interactive Orphan Warnings
 To prevent isolated orphan nodes and guarantee graph lineage:
@@ -136,7 +144,7 @@ pip install -e .
 ```
 
 > [!TIP]
-> **Windows Update Process**: Running `tacit update` automatically clears any background `tacit serve` or MCP daemon locks before applying the upgrade, ensuring a clean and seamless update without needing manual cleanup.
+> **Updating later**: `tacit update` detects an editable (`pip install -e .`) checkout and updates it in place with `git pull` + `pip install -e .`, so the clone you installed from is never replaced by a Git-URL install. Verify the result with `tacit --version`.
 
 ---
 
@@ -264,8 +272,11 @@ tacit search "JWT" --include-superseded
 
 ### Backfill Vector Embeddings
 ```bash
-# Embed all memories in the database using local fastembed (idempotent and resumable)
+# Embed all memories missing embeddings (idempotent and resumable)
 tacit reindex
+
+# Rebuild every vector — required after switching embedding provider
+tacit reindex --force
 ```
 
 ### Record a Memory
@@ -375,15 +386,42 @@ tacit clear
 ```bash
 # Update Tacit to the latest version from GitHub and refresh project rule files
 tacit update
+
+# Confirm the installed version (use this instead of guessing)
+tacit --version
 ```
+
+If Tacit was installed from a clone with `pip install -e .`, the update automatically runs `git pull` + `pip install -e .` instead of installing from the Git URL. Force the source path explicitly with `tacit update --source`.
+
+**Windows notes.** A running `tacit.exe` (including an MCP server started by your editor) cannot be replaced in place — that is the source of the `[WinError 32] ... tacit.exe -> tacit.exe.deleteme` error. `tacit update` handles this for you: it runs detached, waits for the current process to exit, stops leftover `tacit serve`/`tacit mcp` daemons *and* their backing `python.exe` processes, quarantines the old launcher, clears stale `~acit-…dist-info` leftovers, and then reinstalls.
+
+Because that updater has no console, its output goes to:
+
+| Path | Contents |
+|---|---|
+| `~/.gemini/config/tacit_update.log` | Full updater log, including raw `pip` output |
+| `~/.gemini/config/tacit_update_status.json` | Machine-readable result of the last run |
+
+Run `tacit update` again to be shown the log path and the failure reason if the previous run did not finish cleanly. If it keeps failing, quit the editors that have the Tacit MCP server configured and re-run it.
+
+**Verify you are updating the checkout you think you are.** `tacit --version` prints both the version and the directory the running code came from:
+
+```
+tacit 0.1.0
+D:\startups-ideas\tacit\tacit
+```
+
+An editable install (`pip install -e .`) stays pinned to the directory it was installed from, so a *different* clone is never the one being executed. If that path is not the checkout you are working in, reinstall from the right one (`cd <checkout> && pip install -e .`); `tacit update` also warns about this when it detects the mismatch.
 
 ### Configuration Options and Environment Variables
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | `None` | Optional Google Gemini API key for remote `text-embedding-004` (768-dim) dense vector embeddings. If unset, automatically falls back to local fastembed ONNX on CPU. |
+| `GEMINI_API_KEY` | `None` | Google Gemini API key for `gemini-embedding-001` (768-dim) embeddings. Used when `OPENAI_API_KEY` is not set. If neither key is set, Tacit falls back to local fastembed ONNX on CPU. |
+| `OPENAI_API_KEY` | `None` | OpenAI API key for `text-embedding-3-small` (1536-dim) embeddings. Highest-priority provider. |
+| `TACIT_OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model to use. |
 | `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
-| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local FastEmbed ONNX embedding model (used when `GEMINI_API_KEY` is not provided). |
+| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local FastEmbed ONNX embedding model (used only when no API key is set). |
 | `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
 | `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
 | `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |
@@ -420,10 +458,10 @@ When connected via MCP, AI agents have access to the following 6 tools:
 |---|---|---|
 | `memory_add` | Persist an immutable decision, command, hack, architecture, or error. Supports auto-linking and orphan warnings. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
 | `memory_link` | Explicitly attach or adjust causal edges between nodes (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
-| `memory_search` | Hybrid search (BM25 + fastembed ONNX dense vectors via RRF). | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
+| `memory_search` | Hybrid search (BM25 + dense vectors via RRF), ranked by relevance × PageRank authority. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
 | `memory_get` | Fetch markdown content and Merkle lineage by ID. Shows alert banners if superseded or retracted. | `node_id` |
 | `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
-| `memory_context` | Generate a relevance-ranked, token-budgeted project briefing (DAG centrality, impact, recency decay). | `budget`, `scope_hint`, `timeframe` |
+| `memory_context` | Generate a token-budgeted project briefing ranked by PageRank authority (impact and recency as bounded tie-breakers). | `budget`, `scope_hint`, `timeframe` |
 | `memory_projects`| List all registered project workspaces across your machine. | None |
 
 > Deletion is restricted to developers via the CLI (`tacit delete <id>`) or Dashboard UI to prevent AI agents from removing historical institutional memory.
