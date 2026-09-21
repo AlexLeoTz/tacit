@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 import uuid
 import yaml
-
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -107,7 +106,6 @@ def main_callback(
             pass
 
 
-
 def get_storage(project: Optional[str] = None) -> MemoryStorage:
     """Helper to initialize storage for target or current project root."""
     if project:
@@ -143,7 +141,10 @@ def init(
     agy_rule = target_root / ".agents" / "rules" / "tacit.md"
     agy_rule.parent.mkdir(parents=True, exist_ok=True)
     if force or not agy_rule.exists():
-        agy_rule.write_text(f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Tacit\n---\n\n{rule_content}", encoding="utf-8")
+        agy_rule.write_text(
+            f"---\ntrigger: always_on\ndescription: Institutional memory guideline using Tacit\n---\n\n{rule_content}",
+            encoding="utf-8",
+        )
 
     # 2. Cursor rules
     cursor_rule = target_root / ".cursorrules"
@@ -162,7 +163,9 @@ def init(
         except Exception:
             pass
 
-    embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold]"
+    embed_provider_msg = (
+        "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold]"
+    )
     if gemini_key:
         try:
             use_gemini = typer.confirm(
@@ -191,8 +194,6 @@ def init(
     )
 
 
-
-
 @app.command()
 def remember(
     content: str = typer.Argument(..., help="Detailed content of the memory entry"),
@@ -202,16 +203,30 @@ def remember(
         "-t",
         help=f"Memory category. One of: {', '.join(Config.MEMORY_TYPES)}",
     ),
-    summary: str = typer.Option("", "--summary", "-s", help="Concise summary (auto-generated if omitted)"),
+    summary: str = typer.Option(
+        "", "--summary", "-s", help="Concise summary (auto-generated if omitted)"
+    ),
     title: str = typer.Option("", "--title", help="Title for the memory node"),
-    tags: str = typer.Option("", "--tags", help="Comma-separated tags (e.g. 'auth,jwt,security')"),
+    tags: str = typer.Option(
+        "", "--tags", help="Comma-separated tags (e.g. 'auth,jwt,security')"
+    ),
     scope: str = typer.Option("", "--scope", help="Comma-separated scope paths"),
-    impact: str = typer.Option("medium", "--impact", "-i", help="Impact level: high, medium, low"),
-    parents: str = typer.Option("", "--parents", "-p", help="Comma-separated parent memory IDs"),
-    supersedes: str = typer.Option("", "--supersedes", help="Comma-separated memory IDs superseded by this entry"),
-    relation_note: str = typer.Option("", "--relation-note", help="Reason for superseding/deriving"),
+    impact: str = typer.Option(
+        "medium", "--impact", "-i", help="Impact level: high, medium, low"
+    ),
+    parents: str = typer.Option(
+        "", "--parents", "-p", help="Comma-separated parent memory IDs"
+    ),
+    supersedes: str = typer.Option(
+        "", "--supersedes", help="Comma-separated memory IDs superseded by this entry"
+    ),
+    relation_note: str = typer.Option(
+        "", "--relation-note", help="Reason for superseding/deriving"
+    ),
     author: str = typer.Option("user", "--author", "-a", help="Author tag"),
-    project: Optional[str] = typer.Option(None, "--project", help="Target project name or directory path"),
+    project: Optional[str] = typer.Option(
+        None, "--project", help="Target project name or directory path"
+    ),
 ):
     """Add a new persistent memory entry."""
     storage = get_storage(project)
@@ -223,6 +238,7 @@ def remember(
 
     # Validate scope paths exist in target project root
     from ..core.memory_node import validate_scope_paths
+
     validate_scope_paths(scope_list, project)
 
     node = MemoryNode(
@@ -246,24 +262,47 @@ def remember(
     )
     if success:
         proj_label = f" [cyan]({project})[/cyan]" if project else ""
-        sup_label = f" [yellow](Supersedes: {', '.join(supersede_list)})[/yellow]" if supersede_list else ""
-        console.print(f"[bold green]Recorded [{node.type.upper()}]:[/bold green]{proj_label}{sup_label} {node.summary}")
+        sup_label = (
+            f" [yellow](Supersedes: {', '.join(supersede_list)})[/yellow]"
+            if supersede_list
+            else ""
+        )
+        console.print(
+            f"[bold green]Recorded [{node.type.upper()}]:[/bold green]{proj_label}{sup_label} {node.summary}"
+        )
         console.print(f"[dim]ID:[/dim] {node.id}")
         console.print(f"[dim]Content Hash:[/dim] {node.content_hash[:16]}...")
     else:
-        console.print("[bold red]Failed to store memory: duplicate or database integrity error.[/bold red]")
+        console.print(
+            "[bold red]Failed to store memory: duplicate or database integrity error.[/bold red]"
+        )
 
 
 @app.command()
 def search(
     query: str = typer.Argument(..., help="Search query"),
-    type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by memory type"),
-    mode: str = typer.Option("hybrid", "--mode", "-m", help="Search mode: hybrid or keyword"),
-    scope: Optional[str] = typer.Option(None, "--scope", help="Comma-separated scope path hints"),
-    all_status: bool = typer.Option(False, "--all-status", "--include-superseded", help="Include superseded memories"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Display BM25/vector rank provenance"),
+    type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by memory type"
+    ),
+    mode: str = typer.Option(
+        "hybrid", "--mode", "-m", help="Search mode: hybrid or keyword"
+    ),
+    scope: Optional[str] = typer.Option(
+        None, "--scope", help="Comma-separated scope path hints"
+    ),
+    all_status: bool = typer.Option(
+        False,
+        "--all-status",
+        "--include-superseded",
+        help="Include superseded memories",
+    ),
+    debug: bool = typer.Option(
+        False, "--debug", "-d", help="Display BM25/vector rank provenance"
+    ),
     limit: int = typer.Option(10, "--limit", "-n", help="Maximum results to display"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Search stored memories using hybrid BM25 / dense vector search with RRF fusion."""
     storage = get_storage(project)
@@ -281,10 +320,16 @@ def search(
 
     if not results:
         proj_hint = f" in project '{project}'" if project else ""
-        console.print(f"[yellow]No memory entries found matching '{query}'{proj_hint}.[/yellow]")
+        console.print(
+            f"[yellow]No memory entries found matching '{query}'{proj_hint}.[/yellow]"
+        )
         return
 
-    table = Table(title=f"Search Results for '{query}' ({len(results)} found, mode={mode})", show_header=True, header_style="bold cyan")
+    table = Table(
+        title=f"Search Results for '{query}' ({len(results)} found, mode={mode})",
+        show_header=True,
+        header_style="bold cyan",
+    )
     table.add_column("Date", style="dim", width=16)
     table.add_column("Type", style="magenta", width=10)
     table.add_column("Score", style="green", width=7)
@@ -295,7 +340,11 @@ def search(
     for item in results:
         node = item["node"]
         score = item.get("score", 0.0)
-        date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+        date_str = (
+            datetime.fromtimestamp(node.timestamp)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+        )
         tags_str = ", ".join(node.tags) if node.tags else ""
         status_flag = f" [{node.status.upper()}]" if node.status != "active" else ""
         table.add_row(
@@ -312,7 +361,9 @@ def search(
 
 @app.command()
 def reindex(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -328,44 +379,56 @@ def reindex(
     console.print(f"[dim]Embedding provider:[/dim] {embed_svc.describe()}")
 
     if not embed_svc.available:
-        console.print(Panel.fit(
-            "[bold red]No embedding provider available[/bold red]\n\n"
-            "Semantic search is disabled; queries fall back to keyword matching only.\n\n"
-            "Set [bold cyan]OPENAI_API_KEY[/bold cyan] or [bold cyan]GEMINI_API_KEY[/bold cyan], "
-            "or install the offline model with [bold]pip install fastembed[/bold].",
-            border_style="red",
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]No embedding provider available[/bold red]\n\n"
+                "Semantic search is disabled; queries fall back to keyword matching only.\n\n"
+                "Set [bold cyan]OPENAI_API_KEY[/bold cyan] or [bold cyan]GEMINI_API_KEY[/bold cyan], "
+                "or install the offline model with [bold]pip install fastembed[/bold].",
+                border_style="red",
+            )
+        )
         raise typer.Exit(code=1)
 
     stale = storage.count_stale_embeddings()
     if stale and not force:
-        console.print(Panel.fit(
-            f"[yellow]{stale} memories were embedded with a different model.[/yellow]\n"
-            "Their vectors cannot be compared with the current provider, so they are\n"
-            "skipped by semantic search. Rebuild them with:\n\n"
-            "[bold cyan]tacit reindex --force[/bold cyan]",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel.fit(
+                f"[yellow]{stale} memories were embedded with a different model.[/yellow]\n"
+                "Their vectors cannot be compared with the current provider, so they are\n"
+                "skipped by semantic search. Rebuild them with:\n\n"
+                "[bold cyan]tacit reindex --force[/bold cyan]",
+                border_style="yellow",
+            )
+        )
 
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task(f"Embedding memory entries via {embed_svc.provider}...", total=None)
+        task = progress.add_task(
+            f"Embedding memory entries via {embed_svc.provider}...", total=None
+        )
         done, total = storage.reindex_all(progress=False, force=force)
         progress.advance(task)
 
     if total == 0:
-        console.print("[green]All memory entries are already indexed with dense vector embeddings.[/green]")
+        console.print(
+            "[green]All memory entries are already indexed with dense vector embeddings.[/green]"
+        )
     else:
-        console.print(f"[bold green]Successfully embedded {done}/{total} memories into vector storage.[/bold green]")
+        console.print(
+            f"[bold green]Successfully embedded {done}/{total} memories into vector storage.[/bold green]"
+        )
 
 
 @app.command()
 def get(
     node_id: str = typer.Argument(..., help="Memory node ID (or prefix)"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Get full details of a specific memory entry."""
     storage = get_storage(project)
@@ -378,7 +441,9 @@ def get(
         if len(matches) == 1:
             node = matches[0]
         elif len(matches) > 1:
-            console.print(f"[yellow]Multiple matches found for prefix '{node_id}'. Please specify full UUID.[/yellow]")
+            console.print(
+                f"[yellow]Multiple matches found for prefix '{node_id}'. Please specify full UUID.[/yellow]"
+            )
             return
 
     if not node:
@@ -387,15 +452,21 @@ def get(
 
     exporter = MarkdownExporter(storage)
     md_content = exporter.format_node_markdown(node)
-    console.print(Panel(md_content, title=f"Memory Node: {node.id}", border_style="cyan"))
+    console.print(
+        Panel(md_content, title=f"Memory Node: {node.id}", border_style="cyan")
+    )
 
 
 @app.command()
 def recent(
     days: int = typer.Option(7, "--days", "-d", help="Number of past days to query"),
     limit: int = typer.Option(20, "--limit", "-n", help="Maximum results to return"),
-    type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by memory type"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by memory type"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """List recent memories for the current or specified project."""
     storage = get_storage(project)
@@ -409,14 +480,22 @@ def recent(
         console.print(f"[yellow]No memories found in the last {days} days.[/yellow]")
         return
 
-    table = Table(title=f"Recent Memories (Last {days} Days)", show_header=True, header_style="bold blue")
+    table = Table(
+        title=f"Recent Memories (Last {days} Days)",
+        show_header=True,
+        header_style="bold blue",
+    )
     table.add_column("Date", style="dim", width=18)
     table.add_column("Type", style="magenta", width=12)
     table.add_column("Title / Summary", style="white")
     table.add_column("ID", style="dim", width=10)
 
     for node in memories:
-        date_str = datetime.fromtimestamp(node.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+        date_str = (
+            datetime.fromtimestamp(node.timestamp)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+        )
         table.add_row(
             date_str,
             _esc(f"[{node.type}]"),
@@ -429,7 +508,9 @@ def recent(
 
 @app.command(name="tree")
 def tree(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Visualize the full causal decision tree (DAG) for the project."""
     from rich.tree import Tree
@@ -454,7 +535,9 @@ def tree(
     if not root_nodes:
         root_nodes = nodes[:1]
 
-    root_tree = Tree(f"[bold cyan]Project Memory DAG[/bold cyan] ({len(nodes)} total nodes)")
+    root_tree = Tree(
+        f"[bold cyan]Project Memory DAG[/bold cyan] ({len(nodes)} total nodes)"
+    )
 
     def add_children(tree_branch, node_id, visited=None):
         if visited is None:
@@ -484,8 +567,12 @@ def tree(
 
 @app.command(name="lineage")
 def lineage(
-    node_id: str = typer.Argument(..., help="Memory node UUID or prefix to inspect ancestry"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    node_id: str = typer.Argument(
+        ..., help="Memory node UUID or prefix to inspect ancestry"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Trace and print the full causal ancestor and descendant tree of a specific memory."""
     from ..core.memory_dag import MemoryDAG
@@ -509,38 +596,69 @@ def lineage(
         except Exception:
             pass
 
-    ancestors = [dag.get_node(aid) for aid in dag.get_ancestors(target_node.id) if dag.get_node(aid)]
-    descendants = [dag.get_node(did) for did in dag.get_descendants(target_node.id) if dag.get_node(did)]
+    ancestors = [
+        dag.get_node(aid)
+        for aid in dag.get_ancestors(target_node.id)
+        if dag.get_node(aid)
+    ]
+    descendants = [
+        dag.get_node(did)
+        for did in dag.get_descendants(target_node.id)
+        if dag.get_node(did)
+    ]
 
-    lines = [f"[bold cyan]Causal Lineage for:[/bold cyan] {_esc(target_node.title or target_node.summary)} [dim]({target_node.id[:8]})[/dim]\n"]
+    lines = [
+        f"[bold cyan]Causal Lineage for:[/bold cyan] {_esc(target_node.title or target_node.summary)} [dim]({target_node.id[:8]})[/dim]\n"
+    ]
 
     if ancestors:
         lines.append("[bold yellow]Ancestors (Causal Foundations):[/bold yellow]")
         for a in sorted(ancestors, key=lambda x: x.timestamp):
-            lines.append(f"  └── {_esc(f'[{a.type}]')} {_esc(a.title or a.summary)} [dim]({a.id[:8]})[/dim]")
+            lines.append(
+                f"  └── {_esc(f'[{a.type}]')} {_esc(a.title or a.summary)} [dim]({a.id[:8]})[/dim]"
+            )
     else:
         lines.append("[dim]No ancestor nodes (Root Decision)[/dim]")
 
-    lines.append(f"\n[bold green]► Target Node:[/bold green] {_esc(f'[{target_node.type}]')} {_esc(target_node.title or target_node.summary)} [dim]({target_node.id})[/dim]")
+    lines.append(
+        f"\n[bold green]► Target Node:[/bold green] {_esc(f'[{target_node.type}]')} {_esc(target_node.title or target_node.summary)} [dim]({target_node.id})[/dim]"
+    )
 
     if descendants:
-        lines.append("\n[bold magenta]Descendants (Derived Decisions/Hacks):[/bold magenta]")
+        lines.append(
+            "\n[bold magenta]Descendants (Derived Decisions/Hacks):[/bold magenta]"
+        )
         for d in sorted(descendants, key=lambda x: x.timestamp):
-            lines.append(f"  └── {_esc(f'[{d.type}]')} {_esc(d.title or d.summary)} [dim]({d.id[:8]})[/dim]")
+            lines.append(
+                f"  └── {_esc(f'[{d.type}]')} {_esc(d.title or d.summary)} [dim]({d.id[:8]})[/dim]"
+            )
     else:
         lines.append("[dim]No downstream descendants yet[/dim]")
 
-    console.print(Panel("\n".join(lines), title="Memory Causal Lineage", border_style="cyan"))
-
+    console.print(
+        Panel("\n".join(lines), title="Memory Causal Lineage", border_style="cyan")
+    )
 
 
 @app.command()
 def export(
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory for markdown files"),
-    preview: bool = typer.Option(False, "--preview", help="Launch live preview server after exporting"),
-    port: int = typer.Option(4000, "--port", help="Port for preview HTTP server if --preview is set"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Output directory for markdown files"
+    ),
+    preview: bool = typer.Option(
+        False, "--preview", help="Launch live preview server after exporting"
+    ),
+    port: int = typer.Option(
+        4000, "--port", help="Port for preview HTTP server if --preview is set"
+    ),
+    ws_port: Optional[int] = typer.Option(
+        None,
+        "--ws-port",
+        help="Port for preview WebSocket server (defaults to 4001 or next available)",
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Export stored memories to categorized Markdown files and generate INDEX.md."""
     storage = get_storage(project)
@@ -576,21 +694,33 @@ def export(
         server.start(block=True)
 
 
-
 @app.command()
 def serve(
     port: int = typer.Option(4000, "--port", help="Port for preview HTTP server"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
-    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open preview in default browser"),
+    ws_port: Optional[int] = typer.Option(
+        None,
+        "--ws-port",
+        help="Port for preview WebSocket server (defaults to 4001 or next available)",
+    ),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Directory for exported documentation"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Automatically open preview in default browser"
+    ),
 ):
     """Start real-time Markdown preview server with WebSocket live-reload."""
     if MarkdownPreviewServer.is_tacit_server_running(port):
         console = Console()
-        console.print(f"[bold yellow]Notice:[/bold yellow] A Tacit server instance is already running at [bold cyan]http://localhost:{port}[/bold cyan].")
+        console.print(
+            f"[bold yellow]Notice:[/bold yellow] A Tacit server instance is already running at [bold cyan]http://localhost:{port}[/bold cyan]."
+        )
         if open_browser:
             import webbrowser
+
             webbrowser.open(f"http://localhost:{port}")
         raise typer.Exit(code=0)
 
@@ -600,24 +730,40 @@ def serve(
     server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
     if open_browser:
         import webbrowser
+
         webbrowser.open(f"http://localhost:{port}")
     server.start(block=True)
 
 
 @app.command(name="dashboard")
 def dashboard(
-    port: int = typer.Option(4000, "--port", help="Port for preview and dashboard server"),
-    ws_port: Optional[int] = typer.Option(None, "--ws-port", help="Port for preview WebSocket server (defaults to 4001 or next available)"),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Directory for exported documentation"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
-    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open dashboard in default browser"),
+    port: int = typer.Option(
+        4000, "--port", help="Port for preview and dashboard server"
+    ),
+    ws_port: Optional[int] = typer.Option(
+        None,
+        "--ws-port",
+        help="Port for preview WebSocket server (defaults to 4001 or next available)",
+    ),
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Directory for exported documentation"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Automatically open dashboard in default browser"
+    ),
 ):
     """Start visual Project Memory Dashboard web interface with multi-project support and live-reload."""
     if MarkdownPreviewServer.is_tacit_server_running(port):
         console = Console()
-        console.print(f"[bold yellow]Notice:[/bold yellow] A Tacit dashboard instance is already running at [bold cyan]http://localhost:{port}[/bold cyan].")
+        console.print(
+            f"[bold yellow]Notice:[/bold yellow] A Tacit dashboard instance is already running at [bold cyan]http://localhost:{port}[/bold cyan]."
+        )
         if open_browser:
             import webbrowser
+
             webbrowser.open(f"http://localhost:{port}")
         raise typer.Exit(code=0)
 
@@ -628,6 +774,7 @@ def dashboard(
     server = MarkdownPreviewServer(storage, out_dir, port=port, ws_port=ws_port)
     if open_browser:
         import webbrowser
+
         webbrowser.open(f"http://localhost:{port}")
     server.start(block=True)
 
@@ -639,7 +786,9 @@ def projects():
     current_root = Config.find_project_root()
     registered[current_root.name] = str(current_root.resolve())
 
-    table = Table(title="Registered Projects (Tacit)", show_header=True, header_style="bold green")
+    table = Table(
+        title="Registered Projects (Tacit)", show_header=True, header_style="bold green"
+    )
     table.add_column("Project", style="cyan", width=24)
     table.add_column("Path", style="dim")
     table.add_column("Memories", style="magenta", justify="right", width=10)
@@ -655,7 +804,7 @@ def projects():
                 count = s.get_count()
             except Exception:
                 count = 0
-        is_active = (root == current_root)
+        is_active = root == current_root
         table.add_row(
             name,
             path_str,
@@ -669,7 +818,9 @@ def projects():
 @app.command()
 def delete(
     node_id: str = typer.Argument(..., help="Memory node ID to delete"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ):
     """Delete a specific project memory node with confirmation."""
@@ -684,30 +835,40 @@ def delete(
             node = matches[0]
             node_id = node.id
         elif len(matches) > 1:
-            console.print(f"[yellow]Multiple memories matched prefix '{node_id}'. Please specify full UUID.[/yellow]")
+            console.print(
+                f"[yellow]Multiple memories matched prefix '{node_id}'. Please specify full UUID.[/yellow]"
+            )
             return
         else:
             console.print(f"[red]Memory entry '{node_id}' not found.[/red]")
             return
 
-    console.print(f"[yellow]Target Memory:[/yellow] {_esc(f'[{node.type}]')} {_esc(node.summary)} ([dim]{node.id}[/dim])")
+    console.print(
+        f"[yellow]Target Memory:[/yellow] {_esc(f'[{node.type}]')} {_esc(node.summary)} ([dim]{node.id}[/dim])"
+    )
 
     if not yes:
-        confirm = typer.confirm("Are you sure you want to permanently delete this memory node?")
+        confirm = typer.confirm(
+            "Are you sure you want to permanently delete this memory node?"
+        )
         if not confirm:
             console.print("[dim]Operation canceled.[/dim]")
             return
 
     deleted = storage.delete_memory(node_id)
     if deleted:
-        console.print(f"[bold green]Successfully deleted memory node {node_id}.[/bold green]")
+        console.print(
+            f"[bold green]Successfully deleted memory node {node_id}.[/bold green]"
+        )
     else:
         console.print(f"[bold red]Failed to delete memory node {node_id}.[/bold red]")
 
 
 @app.command()
 def clear(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
 ):
     """Clear all memories from a project database with confirmation."""
@@ -719,33 +880,46 @@ def clear(
         console.print(f"[yellow]No memories stored in project '{root.name}'.[/yellow]")
         return
 
-    console.print(f"[bold red]WARNING:[/bold red] This will delete all [bold]{count}[/bold] memories from project '[cyan]{root.name}[/cyan]' ({root.resolve()}).")
+    console.print(
+        f"[bold red]WARNING:[/bold red] This will delete all [bold]{count}[/bold] memories from project '[cyan]{root.name}[/cyan]' ({root.resolve()})."
+    )
 
     if not yes:
-        confirm = typer.confirm("Are you ABSOLUTELY sure you want to delete all project memories?")
+        confirm = typer.confirm(
+            "Are you ABSOLUTELY sure you want to delete all project memories?"
+        )
         if not confirm:
             console.print("[dim]Operation canceled.[/dim]")
             return
 
     cleared = storage.clear_all_memories()
-    console.print(f"[bold green]Cleared {cleared} memories from project storage.[/bold green]")
+    console.print(
+        f"[bold green]Cleared {cleared} memories from project storage.[/bold green]"
+    )
 
 
 @app.command(name="briefing")
 def briefing_cmd(
-    budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
+    budget: int = typer.Option(
+        Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"
+    ),
     timeframe: str = typer.Option(
         "all",
         "--timeframe",
         "-t",
         help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
     ),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Generate intelligent relevance-ranked project briefing for agent bootstrapping."""
     from ..core.bootstrap import BootstrapEngine
+
     storage = get_storage(project)
-    res = BootstrapEngine.generate_briefing(storage=storage, budget=budget, timeframe=timeframe)
+    res = BootstrapEngine.generate_briefing(
+        storage=storage, budget=budget, timeframe=timeframe
+    )
     # The briefing is pre-rendered plain text: markup=False keeps bracketed titles
     # like "[WinError 32] ..." from being parsed as Rich style tags.
     console.print(res.get("formatted", ""), markup=False)
@@ -753,14 +927,18 @@ def briefing_cmd(
 
 @app.command(name="context")
 def context_cmd(
-    budget: int = typer.Option(Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"),
+    budget: int = typer.Option(
+        Config.TOKEN_BUDGET, "--budget", "-b", help="Token budget cap for briefing"
+    ),
     timeframe: str = typer.Option(
         "all",
         "--timeframe",
         "-t",
         help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
     ),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Alias for 'briefing' — generate relevance-ranked project briefing for agent bootstrapping."""
     briefing_cmd(budget=budget, timeframe=timeframe, project=project)
@@ -771,35 +949,51 @@ def supersede(
     target_id: str = typer.Argument(..., help="ID of the memory node to supersede"),
     by: str = typer.Option(..., "--by", help="ID of the newer successor memory node"),
     reason: str = typer.Option("", "--reason", "-r", help="Reason for superseding"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Explicitly mark a memory node as superseded by a newer memory."""
     storage = get_storage(project)
-    success = storage.supersede_memory(target_id=target_id, by_id=by, reason=reason, actor="human")
+    success = storage.supersede_memory(
+        target_id=target_id, by_id=by, reason=reason, actor="human"
+    )
     if success:
-        console.print(f"[bold green]Successfully marked memory {target_id[:8]} as superseded by {by[:8]}.[/bold green]")
+        console.print(
+            f"[bold green]Successfully marked memory {target_id[:8]} as superseded by {by[:8]}.[/bold green]"
+        )
     else:
-        console.print(f"[bold red]Failed to supersede memory {target_id}. Memory not found.[/bold red]")
+        console.print(
+            f"[bold red]Failed to supersede memory {target_id}. Memory not found.[/bold red]"
+        )
 
 
 @app.command()
 def retract(
     node_id: str = typer.Argument(..., help="ID of the memory node to retract"),
     reason: str = typer.Option("", "--reason", "-r", help="Reason for retraction"),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Mark an erroneously recorded memory as retracted."""
     storage = get_storage(project)
     success = storage.retract_memory(node_id=node_id, reason=reason, actor="human")
     if success:
-        console.print(f"[bold green]Successfully retracted memory node {node_id[:8]}.[/bold green]")
+        console.print(
+            f"[bold green]Successfully retracted memory node {node_id[:8]}.[/bold green]"
+        )
     else:
-        console.print(f"[bold red]Failed to retract memory {node_id}. Memory not found.[/bold red]")
+        console.print(
+            f"[bold red]Failed to retract memory {node_id}. Memory not found.[/bold red]"
+        )
 
 
 @app.command()
 def verify(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Target project name or directory"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
 ):
     """Verify cryptographic hash integrity and causal Merkle roots across all project memories."""
     storage = get_storage(project)
@@ -814,31 +1008,41 @@ def verify(
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task(f"Verifying {len(all_nodes)} memory nodes...", total=len(all_nodes))
+        task = progress.add_task(
+            f"Verifying {len(all_nodes)} memory nodes...", total=len(all_nodes)
+        )
         for node in all_nodes:
             if not node.verify():
                 corrupted += 1
-                console.print(f"[bold red]INTEGRITY MISMATCH:[/bold red] Node `{node.id}` fails content/Merkle verification.")
+                console.print(
+                    f"[bold red]INTEGRITY MISMATCH:[/bold red] Node `{node.id}` fails content/Merkle verification."
+                )
             progress.advance(task)
 
     if corrupted == 0:
-        console.print(Panel.fit(
-            f"[bold green]Verification Passed[/bold green]\n"
-            f"[dim]Total Verified:[/dim] {len(all_nodes)} nodes\n"
-            f"[dim]Cryptographic Proof:[/dim] All content hashes and causal roots match.",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]Verification Passed[/bold green]\n"
+                f"[dim]Total Verified:[/dim] {len(all_nodes)} nodes\n"
+                f"[dim]Cryptographic Proof:[/dim] All content hashes and causal roots match.",
+                border_style="green",
+            )
+        )
     else:
-        console.print(Panel.fit(
-            f"[bold red]Verification Failed[/bold red]\n"
-            f"[red]{corrupted} corrupted nodes detected![/red]",
-            border_style="red",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold red]Verification Failed[/bold red]\n"
+                f"[red]{corrupted} corrupted nodes detected![/red]",
+                border_style="red",
+            )
+        )
 
 
 @app.command()
 def mcp(
-    transport: str = typer.Option("stdio", "--transport", "-t", help="MCP transport mode (stdio)"),
+    transport: str = typer.Option(
+        "stdio", "--transport", "-t", help="MCP transport mode (stdio)"
+    ),
 ):
     """Run Model Context Protocol (MCP) server for AI coding agents."""
     server = MemoryMCPServer()
@@ -847,23 +1051,24 @@ def mcp(
 
 @app.command(name="install-mcp")
 def install_mcp(
-    client: str = typer.Option("claude", "--client", "-c", help="Target client: claude, cursor, or print"),
+    client: str = typer.Option(
+        "claude", "--client", "-c", help="Target client: claude, cursor, or print"
+    ),
 ):
     """Automatically configure Claude Desktop, Cursor, or print the MCP config snippet for global usage."""
     import os
     import sys
 
-    config_entry = {
-        "command": "tacit",
-        "args": ["mcp"]
-    }
+    config_entry = {"command": "tacit", "args": ["mcp"]}
 
     if client.lower() == "print":
-        console.print(Panel(
-            json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2),
-            title="MCP Configuration Snippet",
-            border_style="cyan"
-        ))
+        console.print(
+            Panel(
+                json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2),
+                title="MCP Configuration Snippet",
+                border_style="cyan",
+            )
+        )
         return
 
     sys_os = platform.system().lower()
@@ -871,23 +1076,86 @@ def install_mcp(
         config_path = Path.home() / ".gemini" / "config" / "mcp_config.json"
     elif client.lower() == "claude":
         if sys_os == "windows":
-            config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+            config_path = (
+                Path(os.environ.get("APPDATA", ""))
+                / "Claude"
+                / "claude_desktop_config.json"
+            )
         elif sys_os == "darwin":
-            config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+            config_path = (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "Claude"
+                / "claude_desktop_config.json"
+            )
         else:
-            config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+            config_path = (
+                Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+            )
     elif client.lower() in ("claude-code", "claude_code"):
         config_path = Path.home() / ".claude.json"
     elif client.lower() == "cursor":
         if sys_os == "windows":
-            config_path = Path(os.environ.get("APPDATA", "")) / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
+            config_path = (
+                Path(os.environ.get("APPDATA", ""))
+                / "Cursor"
+                / "User"
+                / "globalStorage"
+                / "cursor_desktop_config.json"
+            )
         elif sys_os == "darwin":
-            config_path = Path.home() / "Library" / "Application Support" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
+            config_path = (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "Cursor"
+                / "User"
+                / "globalStorage"
+                / "cursor_desktop_config.json"
+            )
         else:
-            config_path = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
+            config_path = (
+                Path.home()
+                / ".config"
+                / "Cursor"
+                / "User"
+                / "globalStorage"
+                / "cursor_desktop_config.json"
+            )
 
     elif client.lower() in ("deepseek", "dsh", "deepseek-harness"):
-        config_path = Path.home() / ".config" / "deepseek-harness" / "profiles" / "default.yaml"
+        # dsh resolves its home as: explicit path -> $DSH_HOME -> ~/.dsh
+        dsh_home = Path(os.environ.get("DSH_HOME") or (Path.home() / ".dsh"))
+        profiles_dir = dsh_home / "profiles"
+
+        # A dsh profile is a DIRECTORY (cordis.yml + cordis.patch.yml +
+        # package.json). There is no per-profile .yaml file.
+        profile = os.environ.get("DSH_PROFILE", "web")
+        config_path = profiles_dir / profile / "cordis.patch.yml"
+
+        if not config_path.exists():
+            available = (
+                sorted(
+                    p.name
+                    for p in profiles_dir.iterdir()
+                    if p.is_dir() and (p / "cordis.yml").exists()
+                )
+                if profiles_dir.is_dir()
+                else []
+            )
+            console.print(f"[red]No dsh profile found at {config_path}[/red]")
+            if available:
+                console.print(
+                    f"[yellow]Profiles available: {', '.join(available)}[/yellow]"
+                )
+                console.print("[yellow]Re-run with DSH_PROFILE=<name> set.[/yellow]")
+            else:
+                console.print(
+                    f"[yellow]Is dsh installed? Looked in {profiles_dir}[/yellow]"
+                )
+            return
+
         dsh_plugin_entry = {
             "id": "mcp-tacit",
             "name": "@deepseek-ai/dsh-mcp-client",
@@ -896,47 +1164,87 @@ def install_mcp(
                 "transport": "stdio",
                 "command": "tacit",
                 "args": ["mcp"],
-                "failOnStartupError": False
-            }
+                # Flip to True if you want a failed connection to abort dsh
+                # startup loudly instead of silently registering no tools.
+                "failOnStartupError": False,
+            },
         }
 
+        # The patch layer is a top-level YAML LIST of patch entries; a plugin
+        # row must be wrapped in an `insert:` entry.
+        insert_entry = {"insert": [dsh_plugin_entry]}
+        manual_hint = yaml.dump(
+            [insert_entry], sort_keys=False, default_flow_style=False
+        )
+
         try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
-            if config_path.exists():
-                try:
-                    data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-                except Exception:
-                    data = {}
+            raw = config_path.read_text(encoding="utf-8")
 
-            if "plugins" not in data or not isinstance(data["plugins"], list):
-                data["plugins"] = []
+            try:
+                data = yaml.safe_load(raw)
+            except yaml.YAMLError as e:
+                # The patch layer permits `!!js` expressions, which PyYAML
+                # cannot round-trip. Never clobber the user's file.
+                console.print(f"[red]Cannot safely parse {config_path}: {e}[/red]")
+                console.print(
+                    "[yellow]Add this block to the existing top-level list:[/yellow]"
+                )
+                console.print(manual_hint)
+                return
 
-            # Remove existing tacit plugin entry if present
-            data["plugins"] = [
-                p for p in data["plugins"]
-                if not (isinstance(p, dict) and p.get("id") == "mcp-tacit")
-            ]
-            
-            # Append updated entry
-            data["plugins"].append(dsh_plugin_entry)
+            if data is None:
+                data = []
+            if not isinstance(data, list):
+                console.print(
+                    f"[red]{config_path} is not a top-level YAML list; leaving it untouched.[/red]"
+                )
+                console.print("[yellow]Add this block manually:[/yellow]")
+                console.print(manual_hint)
+                return
 
-            config_path.write_text(yaml.dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
+            # Drop any previous mcp-tacit row, then append a fresh insert.
+            cleaned = []
+            for entry in data:
+                if isinstance(entry, dict) and isinstance(entry.get("insert"), list):
+                    remaining = [
+                        row
+                        for row in entry["insert"]
+                        if not (isinstance(row, dict) and row.get("id") == "mcp-tacit")
+                    ]
+                    if not remaining and set(entry) == {"insert"}:
+                        continue  # that insert existed only for us
+                    entry = {**entry, "insert": remaining}
+                cleaned.append(entry)
+            cleaned.append(insert_entry)
 
-            console.print(Panel.fit(
-                f"[bold green]MCP Server Configured Successfully[/bold green]\n"
-                f"[dim]Client:[/dim]  DeepSeek Harness\n"
-                f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
-                f"[cyan]The 'tacit mcp' plugin is now registered in your default DeepSeek profile.[/cyan]",
-                border_style="green",
-            ))
+            data = cleaned
+
+            config_path.write_text(
+                yaml.dump(data, sort_keys=False, default_flow_style=False),
+                encoding="utf-8",
+            )
+
+            console.print(
+                Panel.fit(
+                    f"[bold green]MCP Server Configured Successfully[/bold green]\n"
+                    f"[dim]Client:[/dim]  DeepSeek Harness\n"
+                    f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
+                    f"[cyan]The 'tacit mcp' server is registered for the '{profile}' profile.[/cyan]\n"
+                    f"[dim]Send a new message (or restart dsh) for the tools to appear.[/dim]",
+                    border_style="green",
+                )
+            )
         except Exception as e:
             console.print(f"[red]Failed to write DeepSeek Harness config: {e}[/red]")
-            console.print("[yellow]You can manually add this plugin block to your dsh YAML profile:[/yellow]")
-            console.print(yaml.dump({"plugins": [dsh_plugin_entry]}, sort_keys=False))
+            console.print(
+                "[yellow]You can manually add this plugin block to your dsh profile:[/yellow]"
+            )
+            console.print(manual_hint)
         return
     else:
-        console.print(f"[red]Unknown client '{client}'. Supported options: antigravity, agy, claude, claude-code, cursor, print.[/red]")
+        console.print(
+            f"[red]Unknown client '{client}'. Supported options: antigravity, agy, claude, claude-code, cursor, print.[/red]"
+        )
         return
 
     try:
@@ -958,16 +1266,20 @@ def install_mcp(
         existing_data["mcpServers"]["tacit"] = config_entry
         config_path.write_text(json.dumps(existing_data, indent=2), encoding="utf-8")
 
-        console.print(Panel.fit(
-            f"[bold green]MCP Server Configured Successfully[/bold green]\n"
-            f"[dim]Client:[/dim]  {client.capitalize()}\n"
-            f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
-            f"[cyan]The 'tacit mcp' server is now globally registered for all projects.[/cyan]",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]MCP Server Configured Successfully[/bold green]\n"
+                f"[dim]Client:[/dim]  {client.capitalize()}\n"
+                f"[dim]Config:[/dim]  {config_path.resolve()}\n\n"
+                f"[cyan]The 'tacit mcp' server is now globally registered for all projects.[/cyan]",
+                border_style="green",
+            )
+        )
     except Exception as e:
         console.print(f"[red]Failed to write config automatically: {e}[/red]")
-        console.print("[yellow]You can manually add this to your MCP configuration:[/yellow]")
+        console.print(
+            "[yellow]You can manually add this to your MCP configuration:[/yellow]"
+        )
         console.print(json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2))
 
 
@@ -986,7 +1298,10 @@ def _is_editable_install() -> bool:
     try:
         site = Path(sysconfig.get_path("purelib") or "")
         if site.is_dir():
-            if any(site.glob("__editable__*tacit*.pth")) or (site / "tacit.egg-link").exists():
+            if (
+                any(site.glob("__editable__*tacit*.pth"))
+                or (site / "tacit.egg-link").exists()
+            ):
                 return True
     except Exception:
         pass
@@ -1014,7 +1329,12 @@ def _resolve_update_mode(force_source: bool) -> tuple[bool, Optional[Path]]:
     ``~acit-0.1.0.dist-info`` debris in site-packages, so an editable install is
     always updated in place instead.
     """
-    dev_env = os.environ.get("TACIT_DEV_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+    dev_env = os.environ.get("TACIT_DEV_MODE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     source_root = _local_source_root()
     editable = bool(source_root) and (force_source or dev_env or _is_editable_install())
     return editable, (source_root if editable else None)
@@ -1087,7 +1407,9 @@ def update(
 
     if editable:
         console.print(f"[dim]Source checkout detected:[/dim] {source_root}")
-        console.print("[dim]Updating in editable mode (git pull + pip install -e).[/dim]")
+        console.print(
+            "[dim]Updating in editable mode (git pull + pip install -e).[/dim]"
+        )
 
     # ------------------------------------------------------------------
     # Windows: a running tacit.exe cannot be replaced in place, so the work
@@ -1097,7 +1419,9 @@ def update(
         try:
             updater.launch_detached_windows_updater(spec)
         except Exception as exc:
-            console.print(f"[bold red]Failed to launch the background updater: {exc}[/bold red]")
+            console.print(
+                f"[bold red]Failed to launch the background updater: {exc}[/bold red]"
+            )
             console.print("[yellow]Manual fix:[/yellow]")
             console.print("  1. Close every editor running the Tacit MCP server")
             console.print(
@@ -1156,7 +1480,3 @@ def update(
 
 if __name__ == "__main__":
     app()
-
-
-
-
