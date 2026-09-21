@@ -154,6 +154,98 @@ def redact(text: str) -> str:
     return _KEY_PATTERN.sub("***REDACTED***", text)
 
 
+def body_message(raw: str) -> str:
+    """Pull a human-readable reason out of an error body, whatever its shape.
+
+    Every provider hides the reason in the body rather than the status line:
+
+    * Google  ``{"error": {"code": 400, "message": "...", "status": "INVALID_ARGUMENT"}}``
+    * OpenAI  ``{"error": {"message": "...", "type": "invalid_request_error", "code": "..."}}``
+    * generic ``{"message": ...}``, ``{"detail": ...}`` or plain text
+    """
+    if not raw.strip():
+        return ""
+
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return " ".join(raw.split())[:300]
+
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = error.get("message") or ""
+            qualifiers = [
+                str(error[key]) for key in ("status", "type", "code") if error.get(key)
+            ]
+            if message:
+                return f"[{'/'.join(qualifiers)}] {message}" if qualifiers else str(message)
+        if isinstance(error, str) and error:
+            return error
+        for key in ("message", "detail", "error_description"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return " ".join(raw.split())[:300]
+
+
+def error_detail(exc: Exception) -> str:
+    """Extract the provider's own explanation from an HTTP error.
+
+    Google answers an invalid API key with ``HTTP 400 Bad Request`` and puts the
+    actual reason only in the JSON body (``API key not valid``), so surfacing
+    ``str(exc)`` alone tells the user nothing actionable.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return f"{type(exc).__name__}: {exc}"
+
+    reason = getattr(exc, "reason", "") or ""
+    try:
+        raw = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        raw = ""
+
+    detail = body_message(raw)
+    return f"HTTP {exc.code} {reason}".strip() + (f": {detail}" if detail else "")
+
+
+#: Fragments that mean "the credential was refused", across provider wordings.
+_AUTH_MARKERS = (
+    "api key not valid",
+    "api_key_invalid",
+    "incorrect api key",
+    "invalid api key",
+    "unauthenticated",
+    "permission denied",
+    "permission_denied",
+)
+
+#: Fragments that mean "you are out of allowance", not "your request is wrong".
+_QUOTA_MARKERS = ("quota", "rate limit", "rate_limit", "too many requests", "billing")
+
+
+def remediation_hint(provider: str, detail: str) -> str:
+    """Turn a provider error into something the user can act on."""
+    lowered = detail.lower()
+
+    if any(marker in lowered for marker in _AUTH_MARKERS):
+        variable = "GEMINI_API_KEY" if provider == "Gemini" else "OPENAI_API_KEY"
+        return (
+            f"\nHint: the provider rejected the credential Tacit sent. Check that {variable} is set "
+            "in THIS shell (a revoked or stale key may still be exported), that the key is still "
+            "active, and that the embeddings API is enabled for its project."
+        )
+
+    if any(marker in lowered for marker in _QUOTA_MARKERS):
+        return (
+            "\nHint: this is an allowance limit, not a bad request. Wait for the quota window to "
+            "reset, or slow the backfill down with TACIT_EMBED_MIN_INTERVAL (seconds between "
+            "requests) and TACIT_EMBED_BATCH_SIZE (items per request)."
+        )
+
+    return ""
+
+
 class EmbeddingService:
     """Singleton service resolving one embedding provider for the whole process."""
 
@@ -229,6 +321,20 @@ class EmbeddingService:
     def last_error(self) -> str:
         """Why the local model could not be used, for user-facing messages."""
         return self._last_error
+
+    def key_hint(self) -> str:
+        """Masked fingerprint of the credential in use, for local diagnosis.
+
+        Shows enough to tell *which* key the process is actually holding — the
+        usual cause of a rejected key is a revoked one still exported in the
+        shell that launched the command.
+        """
+        key = self._openai_key() or self._gemini_key()
+        if not key:
+            return "none"
+        if len(key) <= 12:
+            return "***"
+        return f"{key[:6]}...{key[-4:]}"
 
     @property
     def dimension(self) -> int:
@@ -348,9 +454,11 @@ class EmbeddingService:
             except Exception as exc:
                 self._last_request_at = time.time()
                 attempt += 1
+                detail = redact(error_detail(exc))
                 if not self._is_retryable(exc) or attempt > MAX_RETRIES:
                     raise EmbeddingUnavailable(
-                        f"{provider} embedding request failed: {redact(str(exc))}"
+                        f"{provider} embedding request failed: {detail}"
+                        + remediation_hint(provider, detail)
                     ) from exc
 
                 wait = self._retry_after(exc) or delay
@@ -358,8 +466,7 @@ class EmbeddingService:
                 # Jitter avoids every worker waking up at the same instant.
                 wait += random.uniform(0.0, 0.25 * wait)
                 self._last_error = redact(
-                    f"{provider} {type(exc).__name__}: {exc} — retry {attempt}/{MAX_RETRIES} "
-                    f"in {wait:.1f}s"
+                    f"{provider} {detail} — retry {attempt}/{MAX_RETRIES} in {wait:.1f}s"
                 )
                 self._sleep(wait)
                 delay = min(delay * 2, BACKOFF_MAX)
@@ -474,6 +581,8 @@ class EmbeddingService:
             raise EmbeddingUnavailable(
                 f"local ONNX embedding model is not available in {self.cache_dir}"
                 + (f" ({self._last_error})" if self._last_error else "")
+                + "\nHint: download it with `tacit reindex`, install it with `pip install fastembed`,"
+                " or set OPENAI_API_KEY / GEMINI_API_KEY to use a hosted provider instead."
             )
         out: list[list[float]] = []
         for start in range(0, len(texts), BATCH_SIZE):
@@ -495,8 +604,10 @@ class EmbeddingService:
         if provider == "local":
             return self._embed_local(texts)
         raise EmbeddingUnavailable(
-            "no embedding provider configured: set OPENAI_API_KEY or GEMINI_API_KEY, "
-            "or install the local model with `pip install fastembed`"
+            "no embedding provider configured.\n"
+            "Hint: set OPENAI_API_KEY (text-embedding-3-small) or GEMINI_API_KEY "
+            "(gemini-embedding-001), or install the offline model with "
+            "`pip install fastembed` and download it via `tacit reindex`."
         )
 
     def embed_query(self, text: str) -> list[float]:

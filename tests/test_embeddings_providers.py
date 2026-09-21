@@ -393,6 +393,185 @@ def test_redact_strips_credentials_from_messages():
 
 
 # ---------------------------------------------------------------------------
+# Surfacing the provider's own reason
+#
+# Google answers an invalid key with HTTP 400 and puts the reason only in the
+# body, so "HTTP Error 400: Bad Request" told the user nothing.
+# ---------------------------------------------------------------------------
+
+GEMINI_BAD_KEY_BODY = json.dumps({
+    "error": {
+        "code": 400,
+        "message": "API key not valid. Please pass a valid API key.",
+        "status": "INVALID_ARGUMENT",
+    }
+}).encode("utf-8")
+
+
+def _http_error_with_body(code, body):
+    error = emb.urllib.error.HTTPError(
+        url="https://example.invalid", code=code, msg="Bad Request", hdrs={}, fp=None
+    )
+    error.read = lambda: body
+    return error
+
+
+def test_error_detail_extracts_the_api_message():
+    detail = emb.error_detail(_http_error_with_body(400, GEMINI_BAD_KEY_BODY))
+
+    assert "400" in detail
+    assert "API key not valid" in detail
+    assert "INVALID_ARGUMENT" in detail
+
+
+OPENAI_BAD_KEY_BODY = json.dumps({
+    "error": {
+        "message": "Incorrect API key provided: sk-***. You can find your API key at ...",
+        "type": "invalid_request_error",
+        "param": None,
+        "code": "invalid_api_key",
+    }
+}).encode("utf-8")
+
+
+def test_error_detail_handles_the_openai_shape():
+    """OpenAI uses type/code where Google uses status."""
+    detail = emb.error_detail(_http_error_with_body(401, OPENAI_BAD_KEY_BODY))
+
+    assert "Incorrect API key provided" in detail
+    assert "invalid_api_key" in detail
+
+
+def test_an_openai_rejection_names_the_right_variable(monkeypatch, no_local_model):
+    def bad_key(request, timeout=None):
+        raise _http_error_with_body(401, OPENAI_BAD_KEY_BODY)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(emb.urllib.request, "urlopen", bad_key)
+    monkeypatch.setattr(EmbeddingService, "_respect_request_interval", lambda self: None)
+
+    with pytest.raises(EmbeddingUnavailable) as excinfo:
+        EmbeddingService.get().embed_documents(["x"])
+
+    message = str(excinfo.value)
+    assert "Incorrect API key" in message
+    assert "OPENAI_API_KEY" in message
+    assert "GEMINI_API_KEY" not in message
+
+
+def test_body_message_survives_unexpected_shapes():
+    assert emb.body_message('{"detail": "not found"}') == "not found"
+    assert emb.body_message('{"message": "plain"}') == "plain"
+    assert emb.body_message('{"error": "a bare string"}') == "a bare string"
+    assert emb.body_message("not json at all") == "not json at all"
+    assert emb.body_message("") == ""
+
+
+def test_quota_errors_get_a_pacing_hint_not_an_auth_hint():
+    detail = "HTTP 429 Too Many Requests: [RESOURCE_EXHAUSTED] Quota exceeded"
+
+    hint = emb.remediation_hint("Gemini", detail)
+
+    assert "allowance limit" in hint
+    assert "TACIT_EMBED_MIN_INTERVAL" in hint
+    assert "GEMINI_API_KEY" not in hint, "a quota problem is not a credential problem"
+
+
+def test_unknown_errors_get_no_misleading_hint():
+    assert emb.remediation_hint("Gemini", "HTTP 500 Internal Server Error") == ""
+
+
+def test_error_detail_falls_back_to_a_raw_body():
+    detail = emb.error_detail(_http_error_with_body(500, b"<html>gateway blew up</html>"))
+
+    assert "gateway blew up" in detail
+
+
+def test_error_detail_handles_a_non_http_exception():
+    assert "connection reset" in emb.error_detail(OSError("connection reset"))
+
+
+def test_a_rejected_key_reports_the_reason_and_a_hint(monkeypatch, no_local_model):
+    """The exact reported failure: HTTP 400 with the cause hidden in the body."""
+
+    def bad_key(request, timeout=None):
+        raise _http_error_with_body(400, GEMINI_BAD_KEY_BODY)
+
+    service, _ = _gemini_service(monkeypatch, bad_key, pace=False)
+
+    with pytest.raises(EmbeddingUnavailable) as excinfo:
+        service.embed_documents(["x"])
+
+    message = str(excinfo.value)
+    assert "API key not valid" in message
+    assert "GEMINI_API_KEY" in message, "the hint must name the variable to check"
+
+
+def test_a_bad_request_is_not_retried(monkeypatch, no_local_model):
+    calls = {"n": 0}
+
+    def bad_request(request, timeout=None):
+        calls["n"] += 1
+        raise _http_error_with_body(400, GEMINI_BAD_KEY_BODY)
+
+    service, slept = _gemini_service(monkeypatch, bad_request, pace=False)
+
+    with pytest.raises(EmbeddingUnavailable):
+        service.embed_documents(["x"])
+
+    assert calls["n"] == 1
+    assert slept == []
+
+
+def test_key_hint_masks_the_credential(monkeypatch, no_local_model):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-abcdefghijklmnopqrstuvwxyz")
+
+    hint = EmbeddingService.get().key_hint()
+
+    assert hint.startswith("sk-abc")
+    assert hint.endswith("wxyz")
+    assert "ghijklmnop" not in hint
+
+
+def test_key_hint_without_a_key(no_local_model):
+    assert EmbeddingService.get().key_hint() == "none"
+
+
+# ---------------------------------------------------------------------------
+# Every provider explains itself
+# ---------------------------------------------------------------------------
+
+def test_no_provider_error_lists_every_option(no_local_model):
+    with pytest.raises(EmbeddingUnavailable) as excinfo:
+        EmbeddingService.get().embed_documents(["x"])
+
+    message = str(excinfo.value)
+    assert "OPENAI_API_KEY" in message
+    assert "GEMINI_API_KEY" in message
+    assert "fastembed" in message
+    assert "tacit reindex" in message
+
+
+def test_local_provider_error_explains_the_remedies(monkeypatch):
+    """The local provider cannot return an HTTP body, so its message carries the fix."""
+    from pathlib import Path
+
+    fake_cache = Path("D:/fake-tacit-cache")
+    monkeypatch.setattr(EmbeddingService, "_load", lambda self, allow_download=False: None)
+    monkeypatch.setattr(emb, "resolve_cache_dir", lambda project_root=None: fake_cache)
+    service = EmbeddingService.get()
+
+    with pytest.raises(EmbeddingUnavailable) as excinfo:
+        service._embed_local(["x"])
+
+    message = str(excinfo.value)
+    assert "local ONNX embedding model is not available" in message
+    assert str(fake_cache) in message, "the cache location is part of the diagnosis"
+    assert "pip install fastembed" in message
+    assert "OPENAI_API_KEY" in message
+
+
+# ---------------------------------------------------------------------------
 # Query embedding
 # ---------------------------------------------------------------------------
 

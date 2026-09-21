@@ -409,6 +409,9 @@ def reindex(
 
     console.print(f"[dim]Embedding provider:[/dim] {embed_svc.describe()}")
     console.print(f"[dim]Model cache:[/dim] {embed_svc.cache_dir}")
+    # Masked fingerprint: the usual cause of a rejected key is a revoked one
+    # still exported in the shell that launched this command.
+    console.print(f"[dim]Key in use:[/dim] {embed_svc.key_hint()}")
 
     if not embed_svc.available:
         console.print(
