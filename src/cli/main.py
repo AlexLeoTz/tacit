@@ -396,7 +396,7 @@ def reindex(
     ),
 ):
     """Backfill missing dense vector embeddings across all memories in the project database."""
-    from ..search.embeddings import EmbeddingService
+    from ..search.embeddings import EmbeddingService, EmbeddingUnavailable
 
     storage = get_storage(project)
     embed_svc = EmbeddingService.get()
@@ -435,6 +435,8 @@ def reindex(
             )
         )
 
+    failure: Optional[EmbeddingUnavailable] = None
+    done = total = 0
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -443,8 +445,25 @@ def reindex(
         task = progress.add_task(
             f"Embedding memory entries via {embed_svc.provider}...", total=None
         )
-        done, total = storage.reindex_all(progress=False, force=force)
+        try:
+            done, total = storage.reindex_all(progress=False, force=force)
+        except EmbeddingUnavailable as exc:
+            failure = exc
         progress.advance(task)
+
+    # Reported after the live display is torn down, so Rich cannot clobber it.
+    if failure is not None:
+        console.print(Panel.fit(
+            "[bold red]Embedding stopped early[/bold red]\n\n"
+            f"{failure}\n\n"
+            "Embeddings already written are kept, so re-running "
+            "[bold cyan]tacit reindex[/bold cyan] continues from where it stopped.\n"
+            "If you keep hitting rate limits, widen the gap between requests with\n"
+            "[bold cyan]TACIT_EMBED_MIN_INTERVAL[/bold cyan] or lower "
+            "[bold cyan]TACIT_EMBED_BATCH_SIZE[/bold cyan].",
+            border_style="red",
+        ))
+        raise typer.Exit(code=1)
 
     if total == 0:
         console.print(

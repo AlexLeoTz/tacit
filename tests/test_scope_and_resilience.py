@@ -348,3 +348,34 @@ def test_search_cli_warns_when_results_are_keyword_only(tmp_dir, monkeypatch):
     assert result.exit_code == 0
     assert "keyword-only" in result.stdout
     assert "wal-note" or "WAL mode" in result.stdout
+
+
+def test_reindex_reports_rate_limits_instead_of_a_traceback(tmp_dir, monkeypatch):
+    """A 429 during reindex must explain itself and say the work is resumable."""
+    from src.core.storage import MemoryStorage
+    from src.search.embeddings import EmbeddingUnavailable
+
+    MemoryStorage(tmp_dir / ".tacit" / "memory.db")
+    monkeypatch.setattr(EmbeddingService, "available", property(lambda self: True))
+    monkeypatch.setattr(EmbeddingService, "provider", property(lambda self: "gemini"))
+    monkeypatch.setattr(EmbeddingService, "cache_dir", property(lambda self: tmp_dir))
+
+    def rate_limited(self, progress=True, force=False):
+        raise EmbeddingUnavailable(
+            "Gemini embedding request failed: HTTP Error 429: Too Many Requests"
+        )
+
+    monkeypatch.setattr(MemoryStorage, "reindex_all", rate_limited)
+
+    from src.cli.main import app
+
+    result = CliRunner().invoke(app, ["reindex", "--project", str(tmp_dir)])
+
+    # Panel borders sit between wrapped lines, so assert on fragments that stay
+    # inside a single line rather than on prose that spans a wrap.
+    flat = " ".join(result.stdout.split())
+    assert result.exit_code == 1
+    assert "Embedding stopped early" in flat
+    assert "HTTP Error 429: Too Many Requests" in flat
+    assert "Embeddings already written are kept" in flat
+    assert "TACIT_EMBED_MIN_INTERVAL" in flat
