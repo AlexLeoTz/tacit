@@ -835,7 +835,7 @@ def install_mcp(
         else:
             config_path = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "cursor_desktop_config.json"
 
-    if client.lower() in ("deepseek", "dsh", "deepseek-harness"):
+    elif client.lower() in ("deepseek", "dsh", "deepseek-harness"):
         config_path = Path.home() / ".config" / "deepseek-harness" / "profiles" / "default.yaml"
         dsh_plugin_entry = {
             "id": "mcp-tacit",
