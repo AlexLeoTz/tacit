@@ -1422,12 +1422,16 @@ def update(
     if foreign_checkout:
         console.print(
             Panel.fit(
-                "[yellow]This is not the checkout the installed command runs.[/yellow]\n\n"
-                f"[dim]Running from:[/dim] {updater.package_parent_dir()}\n"
-                f"[dim]This directory:[/dim] {foreign_checkout}\n\n"
-                "An editable install stays pinned to the directory it was installed from, so\n"
-                "the checkout above is the one being updated. To switch to this one, run\n"
-                "[bold cyan]pip install -e .[/bold cyan] from it first.",
+                "[bold yellow]You are updating a different checkout than this one.[/bold yellow]\n\n"
+                f"[dim]The `tacit` command runs code from:[/dim] {updater.package_parent_dir()}\n"
+                f"[dim]You are working in:[/dim]               {foreign_checkout}\n\n"
+                "An editable install stays pinned to the directory it was installed from, so this\n"
+                "update will pull and reinstall [bold]that[/bold] checkout. Edits you make here will not\n"
+                "reach the `tacit` command until the install points at this directory.\n\n"
+                "To switch (do it once, from the checkout you develop in):\n"
+                f"  [bold cyan]cd {foreign_checkout}[/bold cyan]\n"
+                "  [bold cyan]pip install -e .[/bold cyan]\n\n"
+                "[dim]Verify with `tacit --version`, which prints the code path it is running.[/dim]",
                 border_style="yellow",
             )
         )

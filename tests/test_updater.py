@@ -70,12 +70,19 @@ def test_clean_tacit_debris_removes_only_tacit_leftovers(tmp_dir):
 
 def test_find_tacit_debris_reports_deleteme_files(tmp_dir):
     (tmp_dir / "tacit.exe.deleteme").write_text("stale", encoding="utf-8")
-    (tmp_dir / "tacit.exe.old-20240101000000").write_text("stale", encoding="utf-8")
     (tmp_dir / "unrelated.exe").write_text("keep", encoding="utf-8")
 
     found = {p.name for p in updater.find_tacit_debris([tmp_dir])}
 
-    assert found == {"tacit.exe.deleteme", "tacit.exe.old-20240101000000"}
+    assert found == {"tacit.exe.deleteme"}
+
+
+def test_quarantined_launchers_are_not_treated_as_debris(tmp_dir):
+    """Regression: a launcher quarantined seconds ago was deleted as 'debris',
+    leaving the machine with no `tacit` command when the reinstall failed."""
+    (tmp_dir / "tacit.exe.old-20260921193341").write_text("launcher", encoding="utf-8")
+
+    assert updater.find_tacit_debris([tmp_dir]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +248,7 @@ def test_perform_update_retries_after_winerror32(monkeypatch):
     calls = []
     monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory(calls, pip_failures=1))
     monkeypatch.setattr(updater.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
 
     result = updater.perform_update(
         {"python": "python.exe", "git_url": "https://example.com/tacit.git",
@@ -257,6 +265,7 @@ def test_perform_update_retries_after_winerror32(monkeypatch):
 def test_perform_update_editable_runs_git_pull(monkeypatch):
     calls = []
     monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory(calls))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
 
     result = updater.perform_update(
         {"python": "python.exe", "editable": True, "source_root": "/src/tacit",
@@ -273,6 +282,7 @@ def test_perform_update_editable_runs_git_pull(monkeypatch):
 def test_perform_update_reports_failure(monkeypatch):
     monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory([], pip_failures=99))
     monkeypatch.setattr(updater.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
 
     result = updater.perform_update(
         {"python": "python.exe", "target": "git+https://example.com/tacit.git",
@@ -282,6 +292,118 @@ def test_perform_update_reports_failure(monkeypatch):
 
     assert result["ok"] is False
     assert "WinError 32" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Failure diagnosis
+#
+# A real update failed with an error message that stopped mid-sentence and no
+# cause recorded, because the old code used `stderr or stdout` and never logged
+# the exit code. These guard the information needed to diagnose it.
+# ---------------------------------------------------------------------------
+
+def test_exit_code_explains_abnormal_termination():
+    """A killed pip process must not look like a pip refusal."""
+    assert updater.describe_exit_code(0) == "success"
+    assert updater.describe_exit_code(1) == "non-zero exit"
+    assert "access violation" in updater.describe_exit_code(0xC0000005)
+    assert "terminated by Ctrl+C" in updater.describe_exit_code(0xC000013A)
+
+
+def test_summarise_failure_keeps_both_streams_and_exit_code():
+    completed = updater.subprocess.CompletedProcess(
+        args=["pip"], returncode=0xC0000005, stdout="progress output", stderr=""
+    )
+
+    failure = updater.summarise_failure(completed)
+
+    assert failure["returncode"] == 0xC0000005
+    assert "access violation" in failure["exit_meaning"]
+    assert failure["stdout_tail"] == "progress output", "stdout must survive an empty stderr"
+    assert failure["detail"] == "progress output"
+
+
+def test_perform_update_records_an_attempt_log(monkeypatch):
+    monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory([], pip_failures=99))
+    monkeypatch.setattr(updater.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
+
+    result = updater.perform_update(
+        {"python": "python.exe", "target": "git+https://example.com/tacit.git",
+         "attempts": 2, "reinit": False},
+        log=lambda message: None,
+    )
+
+    # Two attempts, each followed by a --user retry for a global install.
+    assert len(result["attempts_log"]) == 4
+    assert {entry["attempt"] for entry in result["attempts_log"]} == {1, "1-user", 2, "2-user"}
+    assert all("returncode" in entry for entry in result["attempts_log"])
+
+
+def test_read_only_install_dir_aborts_editable_update_immediately(monkeypatch, tmp_dir):
+    """Three pip attempts and a minute of retries is the wrong answer to a read-only interpreter."""
+    calls = []
+    monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory(calls))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: ["/ro/site-packages"])
+
+    messages = []
+    result = updater.perform_update(
+        {"python": "python.exe", "editable": True, "source_root": "/src/tacit",
+         "reinit": False, "attempts": 3},
+        log=messages.append,
+    )
+
+    assert result["ok"] is False
+    assert result["blocked_dirs"] == ["/ro/site-packages"]
+    assert "not writable" in result["error"]
+    assert not [c for c in calls if "install" in " ".join(str(p) for p in c)], (
+        "pip must not even be attempted"
+    )
+    assert any("ABORTED" in m for m in messages)
+
+
+def test_read_only_install_dir_still_lets_a_global_install_try_user(monkeypatch):
+    """A read-only system Python can still succeed via --user."""
+    calls = []
+    monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory(calls))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: ["/ro/site-packages"])
+
+    result = updater.perform_update(
+        {"python": "python.exe", "target": "git+https://example.com/tacit.git",
+         "attempts": 1, "reinit": False},
+        log=lambda message: None,
+    )
+
+    assert result["ok"] is True
+    assert [c for c in calls if "install" in " ".join(str(p) for p in c)]
+
+
+def test_source_version_reads_the_checkout(tmp_dir):
+    (tmp_dir / "src").mkdir()
+    (tmp_dir / "src" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
+
+    assert updater.source_version(str(tmp_dir)) == "9.9.9"
+    assert updater.source_version(None) is None
+    assert updater.source_version(str(tmp_dir / "missing")) is None
+
+
+def test_version_mismatch_is_flagged(monkeypatch, tmp_dir):
+    """pip can report success while another install still shadows the checkout."""
+    (tmp_dir / "src").mkdir()
+    (tmp_dir / "src" / "__init__.py").write_text('__version__ = "0.9.0"\n', encoding="utf-8")
+    monkeypatch.setattr(updater.subprocess, "run", _fake_run_factory([]))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
+    monkeypatch.setattr(updater, "installed_version", lambda python_exe=None: "0.1.0")
+
+    result = updater.perform_update(
+        {"python": "python.exe", "editable": True, "source_root": str(tmp_dir),
+         "reinit": False, "attempts": 1},
+        log=lambda message: None,
+    )
+
+    assert result["ok"] is True
+    assert "version_mismatch" in result
+    assert "0.9.0" in result["version_mismatch"]
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +448,79 @@ def test_run_windows_update_records_failure(monkeypatch, tmp_dir):
     status = json.loads(status_file.read_text(encoding="utf-8"))
     assert status["ok"] is False
     assert status["error"] == "boom"
+
+
+def test_launcher_is_restored_when_the_install_fails(monkeypatch, tmp_dir):
+    """The machine must never be left without a `tacit` command.
+
+    A real update quarantined tacit.exe, deleted it as 'debris', then failed —
+    leaving the user with no CLI at all.
+    """
+    scripts = tmp_dir / "Scripts"
+    scripts.mkdir()
+    original = scripts / "tacit.exe"
+    original.write_text("old launcher", encoding="utf-8")
+    quarantined = scripts / "tacit.exe.old-TEST"
+    original.rename(quarantined)
+    moved = [(str(original), str(quarantined))]
+
+    monkeypatch.setattr(updater, "scripts_dir", lambda: scripts)
+    monkeypatch.setattr(updater, "quarantine_console_scripts", lambda *a, **k: (moved, []))
+    monkeypatch.setattr(updater, "clean_tacit_debris", lambda *a, **k: ([], []))
+    monkeypatch.setattr(
+        updater, "perform_update",
+        lambda spec, log=None: {"ok": False, "version": "0.1.1", "error": "pip exploded"},
+    )
+
+    status_file = tmp_dir / "status.json"
+    spec = {"parent_pid": 0, "python": "python.exe", "log": str(tmp_dir / "update.log"),
+            "status": str(status_file), "source_root": str(tmp_dir)}
+
+    assert updater.run_windows_update(spec) == 1
+
+    assert original.exists(), "the previous launcher must be put back"
+    assert not quarantined.exists()
+    status = json.loads(status_file.read_text(encoding="utf-8"))
+    assert status["launcher_restored"] == [str(original)]
+
+
+def test_launcher_is_cleaned_up_only_after_a_successful_install(monkeypatch, tmp_dir):
+    scripts = tmp_dir / "Scripts"
+    scripts.mkdir()
+    fresh = scripts / "tacit.exe"
+    fresh.write_text("new launcher", encoding="utf-8")
+    quarantined = scripts / "tacit.exe.old-TEST"
+    quarantined.write_text("old launcher", encoding="utf-8")
+    moved = [(str(fresh), str(quarantined))]
+
+    monkeypatch.setattr(updater, "scripts_dir", lambda: scripts)
+    monkeypatch.setattr(updater, "quarantine_console_scripts", lambda *a, **k: (moved, []))
+    monkeypatch.setattr(updater, "clean_tacit_debris", lambda *a, **k: ([], []))
+    monkeypatch.setattr(
+        updater, "perform_update",
+        lambda spec, log=None: {"ok": True, "version": "0.1.2", "error": ""},
+    )
+
+    status_file = tmp_dir / "status.json"
+    spec = {"parent_pid": 0, "python": "python.exe", "log": str(tmp_dir / "update.log"),
+            "status": str(status_file)}
+
+    assert updater.run_windows_update(spec) == 0
+
+    assert fresh.exists()
+    assert not quarantined.exists(), "the superseded launcher is removed only after success"
+
+
+def test_restore_quarantined_scripts_never_overwrites_a_new_launcher(tmp_dir):
+    original = tmp_dir / "tacit.exe"
+    original.write_text("new", encoding="utf-8")
+    quarantined = tmp_dir / "tacit.exe.old-TEST"
+    quarantined.write_text("old", encoding="utf-8")
+
+    restored = updater.restore_quarantined_scripts([(str(original), str(quarantined))])
+
+    assert restored == []
+    assert original.read_text(encoding="utf-8") == "new"
 
 
 def test_write_runner_script_is_importable(tmp_dir):
@@ -432,6 +627,26 @@ def test_update_warns_about_previous_failed_run(monkeypatch, tmp_dir):
     assert result.exit_code == 0
     assert "previous update did not finish cleanly" in result.stdout
     assert "WinError 32" in result.stdout
+
+
+def test_update_warns_when_cwd_is_a_different_checkout(monkeypatch, tmp_dir):
+    """The trap that made `tacit update` look broken: it updates the *installed*
+    checkout, which may not be the one being edited."""
+    import platform
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(updater, "launch_detached_windows_updater", lambda spec: tmp_dir / "r.py")
+    monkeypatch.setattr(updater, "read_status", lambda path=None: None)
+    monkeypatch.setattr(updater, "update_log_path", lambda: tmp_dir / "update.log")
+    foreign = tmp_dir / "the-clone-you-edit"
+    monkeypatch.setattr(updater, "find_foreign_checkout", lambda start=None: foreign)
+
+    result = CliRunner().invoke(app, ["update"])
+
+    assert result.exit_code == 0
+    assert "different checkout" in result.stdout
+    assert str(foreign) in result.stdout
+    assert "pip install -e ." in result.stdout
 
 
 def test_update_uses_editable_mode_for_source_checkout(monkeypatch, tmp_dir):

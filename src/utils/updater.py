@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -143,7 +144,12 @@ def _is_tacit_debris_name(name: str) -> bool:
 
 
 def find_tacit_debris(directories: Optional[Iterable[Path]] = None) -> List[Path]:
-    """Return stale ``~*`` distribution directories and ``.deleteme`` files."""
+    """Return stale ``~*`` distribution directories and ``.deleteme`` files.
+
+    Deliberately does **not** match ``*.old-*``: those are launchers this update
+    quarantined moments ago, and deleting them here is what removed the ``tacit``
+    command outright when the reinstall failed.
+    """
     dirs = list(directories) if directories is not None else [purelib_dir(), scripts_dir()]
     found: List[Path] = []
     for directory in dirs:
@@ -153,9 +159,7 @@ def find_tacit_debris(directories: Optional[Iterable[Path]] = None) -> List[Path
             for entry in sorted(directory.iterdir()):
                 if entry.is_dir() and _is_tacit_debris_name(entry.name):
                     found.append(entry)
-                elif entry.is_file() and (
-                    entry.name.endswith(".deleteme") or ".old-" in entry.name
-                ):
+                elif entry.is_file() and entry.name.endswith(".deleteme"):
                     found.append(entry)
         except OSError:
             continue
@@ -244,8 +248,31 @@ def quarantine_console_scripts(tag: Optional[str] = None,
     return moved, failed
 
 
+def restore_quarantined_scripts(
+    moved: Iterable[Tuple[str, str]],
+) -> List[str]:
+    """Put the old launchers back when the install did not produce a new one.
+
+    Quarantining exists to move the launcher *out of pip's way*, not to destroy
+    it. Deleting it before the replacement is known to exist left users with no
+    ``tacit`` command at all when pip failed, which is far worse than a failed
+    update.
+    """
+    restored: List[str] = []
+    for original, quarantined in moved:
+        original_path = Path(original)
+        quarantined_path = Path(quarantined)
+        try:
+            if quarantined_path.exists() and not original_path.exists():
+                quarantined_path.rename(original_path)
+                restored.append(str(original_path))
+        except OSError:
+            continue
+    return restored
+
+
 def remove_quarantined_files(directory: Optional[Path] = None) -> List[str]:
-    """Best-effort removal of ``*.old-*`` launchers left by earlier updates."""
+    """Best-effort removal of ``*.old-*`` launchers, only after a good install."""
     target_dir = directory or scripts_dir()
     removed: List[str] = []
     try:
@@ -414,6 +441,94 @@ def installed_version(python_exe: Optional[str] = None) -> Optional[str]:
 # Shared install sequence
 # ---------------------------------------------------------------------------
 
+#: Windows exit codes that mean "the process was killed", not "pip said no".
+_ABNORMAL_EXITS = {
+    0xC0000005: "access violation (process crashed)",
+    0xC000013A: "terminated by Ctrl+C or console close",
+    0xC0000142: "DLL initialisation failed",
+    0xC0000409: "stack buffer overrun / fail-fast",
+    0xC000001D: "illegal instruction",
+    0xC0000094: "integer divide by zero",
+    0xC00000FD: "stack overflow",
+}
+
+
+def describe_exit_code(returncode: int) -> str:
+    """Explain a subprocess exit code, including the 'killed' ones.
+
+    Without this, a pip process that dies silently is indistinguishable from a
+    pip process that refused to install — which is precisely the case that left
+    an update with an error message ending mid-sentence and no cause.
+    """
+    if returncode == 0:
+        return "success"
+    unsigned = returncode & 0xFFFFFFFF
+    if unsigned in _ABNORMAL_EXITS:
+        return _ABNORMAL_EXITS[unsigned]
+    if returncode < 0:
+        return f"killed by signal {-returncode}"
+    if unsigned >= 0x80000000:
+        return f"abnormal termination (0x{unsigned:08X})"
+    return "non-zero exit"
+
+
+def summarise_failure(completed: Any) -> Dict[str, Any]:
+    """Keep *both* streams plus the exit code from a failed subprocess.
+
+    The original code used ``stderr or stdout``, so an empty stderr silently
+    threw away all of pip's progress output and left no way to tell a refusal
+    from a crash.
+    """
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+    return {
+        "returncode": completed.returncode,
+        "exit_meaning": describe_exit_code(completed.returncode),
+        "stdout_tail": stdout[-1500:],
+        "stderr_tail": stderr[-1500:],
+        "detail": (stderr or stdout or "(no output captured)")[-2000:],
+    }
+
+
+def unwritable_install_dirs(
+    directories: Optional[Iterable[Path]] = None,
+) -> List[str]:
+    """Directories pip must modify to replace Tacit; empty means "go ahead".
+
+    Checked before installing so a read-only interpreter (system Python, a
+    restricted sandbox) produces one clear sentence instead of three pip
+    attempts and a minute of retries.
+    """
+    targets = list(directories) if directories is not None else [purelib_dir(), scripts_dir()]
+    blocked: List[str] = []
+    for directory in targets:
+        try:
+            if not directory.is_dir():
+                continue
+            probe = directory / ".tacit_install_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+        except OSError:
+            blocked.append(str(directory))
+    return blocked
+
+
+def source_version(source_root: Optional[str]) -> Optional[str]:
+    """Read ``__version__`` straight from a checkout's ``src/__init__.py``."""
+    if not source_root:
+        return None
+    init_file = Path(source_root) / "src" / "__init__.py"
+    try:
+        match = re.search(
+            r"""^__version__\s*=\s*["']([^"']+)["']""",
+            init_file.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
 def _default_logger(message: str) -> None:  # pragma: no cover - trivial
     print(message, flush=True)
 
@@ -450,17 +565,48 @@ def perform_update(spec: Dict[str, Any],
             log(f"git pull unavailable ({exc}); continuing with local checkout.")
 
     command = build_pip_command(python_exe, target, editable=editable)
+
+    # Fail fast and clearly on a read-only interpreter rather than retrying pip
+    # three times. An editable install cannot fall back to --user, so it is a
+    # hard stop; a global install still gets its --user retry.
+    blocked = unwritable_install_dirs()
+    if blocked:
+        message = (
+            "These directories are not writable, so pip cannot replace Tacit:\n"
+            + "\n".join(f"  - {directory}" for directory in blocked)
+            + "\nRun `tacit update` from a normal terminal (not a restricted sandbox), "
+            "or install Tacit into a virtualenv you own."
+        )
+        result["blocked_dirs"] = blocked
+        if editable:
+            log("ABORTED: " + message)
+            result["error"] = message
+            result["version"] = installed_version(python_exe)
+            return result
+        log("WARNING: " + message)
+
     log("Running: " + " ".join(command))
 
     last_error = ""
+    attempt_log: List[Dict[str, Any]] = []
     for attempt in range(1, max(1, attempts) + 1):
         completed = subprocess.run(command, capture_output=True, text=True)
         if completed.returncode == 0:
             log(f"pip install succeeded on attempt {attempt}.")
             result["ok"] = True
             break
-        last_error = (completed.stderr or completed.stdout or "").strip()
-        log(f"pip install attempt {attempt} failed:\n{last_error}")
+
+        failure = summarise_failure(completed)
+        attempt_log.append({"attempt": attempt, **failure})
+        last_error = failure["detail"]
+        log(
+            f"pip install attempt {attempt} failed "
+            f"(exit code {failure['returncode']}: {failure['exit_meaning']})"
+        )
+        if failure["stderr_tail"]:
+            log("pip stderr:\n" + failure["stderr_tail"])
+        if failure["stdout_tail"]:
+            log("pip stdout:\n" + failure["stdout_tail"])
 
         if not editable:
             log("Retrying with --user ...")
@@ -470,16 +616,33 @@ def perform_update(spec: Dict[str, Any],
                 log("pip install --user succeeded.")
                 result["ok"] = True
                 break
-            last_error = (user_attempt.stderr or user_attempt.stdout or "").strip()
-            log(f"--user retry failed:\n{last_error}")
+            user_failure = summarise_failure(user_attempt)
+            attempt_log.append({"attempt": f"{attempt}-user", **user_failure})
+            last_error = user_failure["detail"]
+            log(
+                f"--user retry failed (exit code {user_failure['returncode']}: "
+                f"{user_failure['exit_meaning']})"
+            )
 
         if attempt < attempts:
             time.sleep(2.0 * attempt)
 
+    result["attempts_log"] = attempt_log
     result["error"] = last_error
     result["version"] = installed_version(python_exe)
     if result["ok"]:
         log(f"Installed version: {result['version']}")
+        expected = source_version(source_root) if editable else None
+        if expected and result["version"] and expected != result["version"]:
+            # pip reported success but the metadata disagrees with the checkout:
+            # classic symptom of a second install shadowing this one.
+            warning = (
+                f"pip succeeded but the installed version ({result['version']}) does not match "
+                f"the checkout ({expected}). Another install may be shadowing it — check for a "
+                "second `src` package on sys.path or a stale editable finder."
+            )
+            log("WARNING: " + warning)
+            result["version_mismatch"] = warning
 
     if result["ok"] and spec.get("reinit"):
         cwd = spec.get("cwd")
@@ -612,6 +775,13 @@ def run_windows_update(spec: Dict[str, Any]) -> int:
         killed = terminate_windows_daemons(exclude_pids={os.getpid()})
         if killed:
             log(f"Stopped Tacit python daemons: {killed}")
+            # An editor that owns the MCP client will restart these within
+            # seconds, and a respawned launcher can be locked by the editor while
+            # pip is mid-write — a plausible cause of a slow or failed install.
+            log(
+                "NOTE: the editor that started these (MCP client) may relaunch them during the "
+                "install and hold the launcher open. Quit the editor before updating."
+            )
         status["daemons_stopped"] = killed
 
         target_exe = scripts_dir() / "tacit.exe"
@@ -640,15 +810,33 @@ def run_windows_update(spec: Dict[str, Any]) -> int:
 
         result = perform_update(spec, log)
         status.update(result)
+
+        # The quarantined launcher is the only working `tacit` command on the
+        # machine until the new one exists. Keep it until the replacement is
+        # proven present; restore it if the install did not produce one.
+        new_launcher = scripts_dir() / "tacit.exe"
+        if result.get("ok") and new_launcher.exists():
+            leftovers = remove_quarantined_files()
+            if leftovers:
+                log(f"Removed superseded launchers: {leftovers}")
+            status["quarantine_cleanup"] = leftovers
+        elif moved:
+            restored = restore_quarantined_scripts(moved)
+            if restored:
+                log(f"Install did not produce a new launcher — restored {restored}")
+                status["launcher_restored"] = restored
+            else:
+                log(
+                    "WARNING: no working `tacit` launcher remains. Recover with: "
+                    f'"{spec.get("python")}" -m pip install --ignore-installed --no-deps -e '
+                    f'{spec.get("source_root") or spec.get("target")}'
+                )
     except Exception as exc:  # pragma: no cover - defensive
         log(f"Updater crashed: {exc!r}")
         status["ok"] = False
         status["error"] = repr(exc)
     finally:
         status["duration_seconds"] = round(time.time() - started, 1)
-        leftovers = remove_quarantined_files()
-        if leftovers:
-            log(f"Removed quarantined launchers: {leftovers}")
         log(f"Finished (ok={status.get('ok')}, version={status.get('version')}).")
         write_status(status, Path(spec.get("status") or update_status_path()))
         log_file.close()
