@@ -295,6 +295,22 @@ def remove_quarantined_files(directory: Optional[Path] = None) -> List[str]:
 # Daemon termination
 # ---------------------------------------------------------------------------
 
+#: Windows: a console-subsystem child spawned by a process that has *no* console
+#: gets a fresh console allocated. The detached updater is deliberately
+#: console-less, so every `taskkill`, `tasklist`, `powershell`, `git` and `pip`
+#: it ran popped a black window on screen — the "rapid python cmd" flashing.
+_CREATE_NO_WINDOW = 0x08000000
+_DETACHED_PROCESS = 0x00000008
+
+
+def quiet_flags() -> Dict[str, Any]:
+    """Keyword args that stop a child process from opening a console window.
+
+    Empty off Windows, where ``creationflags`` is not supported.
+    """
+    return {"creationflags": _CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -302,7 +318,7 @@ def process_is_alive(pid: int) -> bool:
         try:
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {int(pid)}", "/NH"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, **quiet_flags(),
             ).stdout
         except (OSError, subprocess.SubprocessError):
             return False
@@ -344,7 +360,7 @@ def list_windows_tacit_python_pids() -> List[int]:
         try:
             completed = subprocess.run(
                 [shell, "-NoProfile", "-NonInteractive", "-Command", _PWSH_ENUMERATE],
-                capture_output=True, text=True, env=env, timeout=25,
+                capture_output=True, text=True, env=env, timeout=25, **quiet_flags(),
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -364,13 +380,13 @@ def terminate_windows_daemons(exclude_pids: Iterable[int] = ()) -> List[int]:
 
     # ``/T`` is essential: it takes the child ``python.exe`` down with the launcher.
     subprocess.run(["taskkill", "/F", "/T", "/IM", "tacit.exe"],
-                   capture_output=True, check=False)
+                   capture_output=True, check=False, **quiet_flags())
 
     for pid in list_windows_tacit_python_pids():
         if pid in excluded:
             continue
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                       capture_output=True, check=False)
+                       capture_output=True, check=False, **quiet_flags())
         killed.append(pid)
     return killed
 
@@ -429,7 +445,7 @@ def installed_version(python_exe: Optional[str] = None) -> Optional[str]:
     try:
         completed = subprocess.run(
             [exe, "-c", "import importlib.metadata as m; print(m.version('tacit'))"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, **quiet_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -557,7 +573,8 @@ def perform_update(spec: Dict[str, Any],
         log(f"Pulling latest source in {source_root} ...")
         try:
             pull = subprocess.run(["git", "pull", "--ff-only"], cwd=source_root,
-                                  capture_output=True, text=True, timeout=300)
+                                  capture_output=True, text=True, timeout=300,
+                                  **quiet_flags())
             if pull.returncode != 0:
                 log(f"git pull failed (continuing with local checkout): {pull.stderr.strip()}")
             else:
@@ -591,7 +608,7 @@ def perform_update(spec: Dict[str, Any],
     last_error = ""
     attempt_log: List[Dict[str, Any]] = []
     for attempt in range(1, max(1, attempts) + 1):
-        completed = subprocess.run(command, capture_output=True, text=True)
+        completed = subprocess.run(command, capture_output=True, text=True, **quiet_flags())
         if completed.returncode == 0:
             log(f"pip install succeeded on attempt {attempt}.")
             result["ok"] = True
@@ -612,7 +629,8 @@ def perform_update(spec: Dict[str, Any],
         if not editable:
             log("Retrying with --user ...")
             user_command = command[:-1] + ["--user", command[-1]]
-            user_attempt = subprocess.run(user_command, capture_output=True, text=True)
+            user_attempt = subprocess.run(user_command, capture_output=True, text=True,
+                                          **quiet_flags())
             if user_attempt.returncode == 0:
                 log("pip install --user succeeded.")
                 result["ok"] = True
@@ -653,7 +671,7 @@ def perform_update(spec: Dict[str, Any],
                         ["tacit", "init", "--force"]):
             try:
                 done = subprocess.run(command, cwd=cwd, capture_output=True,
-                                      text=True, timeout=180)
+                                      text=True, timeout=180, **quiet_flags())
             except (OSError, subprocess.SubprocessError):
                 continue
             if done.returncode == 0:
@@ -729,11 +747,9 @@ def launch_detached_windows_updater(spec: Dict[str, Any]) -> Path:
     spec_path = directory / "tacit_update_spec.json"
     spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
 
-    DETACHED_PROCESS = 0x00000008
-    CREATE_NO_WINDOW = 0x08000000
     process = subprocess.Popen(
         [spec["python"], str(runner), str(spec_path)],
-        creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+        creationflags=_DETACHED_PROCESS | _CREATE_NO_WINDOW,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -209,6 +209,79 @@ def test_terminate_windows_daemons_tree_kills_and_excludes(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Quiet spawning
+#
+# A user reported `tacit update` "firing a python cmd rapidly" and found it
+# aggressive: the detached updater has no console, so every taskkill, tasklist,
+# powershell, git and pip child was getting a brand new console window allocated
+# for the fraction of a second it lived.
+# ---------------------------------------------------------------------------
+
+def test_quiet_flags_hide_the_console_on_windows(monkeypatch):
+    monkeypatch.setattr(updater.os, "name", "nt")
+    assert updater.quiet_flags() == {"creationflags": updater._CREATE_NO_WINDOW}
+    assert updater._CREATE_NO_WINDOW & updater._DETACHED_PROCESS == 0
+
+
+def test_quiet_flags_are_empty_off_windows(monkeypatch):
+    """`creationflags` is a Windows-only Popen argument; POSIX must not get it."""
+    monkeypatch.setattr(updater.os, "name", "posix")
+    assert updater.quiet_flags() == {}
+
+
+def _recording_run_factory(records):
+    def fake_run(command, **kwargs):
+        records.append((command, kwargs))
+        joined = " ".join(str(part) for part in command)
+        if "importlib.metadata" in joined:
+            return _Completed(returncode=0, stdout="0.1.0\n")
+        return _Completed(returncode=0, stdout="ok")
+
+    return fake_run
+
+
+@pytest.mark.parametrize("editable", [False, True])
+def test_perform_update_spawns_every_child_without_a_console(monkeypatch, editable):
+    records = []
+    monkeypatch.setattr(updater.os, "name", "nt")
+    monkeypatch.setattr(updater.subprocess, "run", _recording_run_factory(records))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
+
+    spec = {"python": "python.exe", "attempts": 1, "reinit": False}
+    if editable:
+        spec.update({"editable": True, "source_root": "/src/tacit"})
+    else:
+        spec["target"] = "git+https://example.com/tacit.git"
+
+    result = updater.perform_update(spec, log=lambda message: None)
+
+    assert result["ok"] is True
+    # `git pull` in editable mode, the pip install and the metadata probe.
+    assert len(records) >= 2
+    for command, kwargs in records:
+        joined = " ".join(str(part) for part in command)
+        assert kwargs.get("creationflags") == updater._CREATE_NO_WINDOW, joined
+
+
+def test_perform_update_passes_no_creationflags_off_windows(monkeypatch):
+    records = []
+    monkeypatch.setattr(updater.os, "name", "posix")
+    monkeypatch.setattr(updater.subprocess, "run", _recording_run_factory(records))
+    monkeypatch.setattr(updater, "unwritable_install_dirs", lambda directories=None: [])
+
+    result = updater.perform_update(
+        {"python": "python.exe", "target": "git+https://example.com/tacit.git",
+         "attempts": 1, "reinit": False},
+        log=lambda message: None,
+    )
+
+    assert result["ok"] is True
+    assert records
+    for command, kwargs in records:
+        assert "creationflags" not in kwargs, " ".join(str(part) for part in command)
+
+
+# ---------------------------------------------------------------------------
 # pip invocation / install sequence
 # ---------------------------------------------------------------------------
 
