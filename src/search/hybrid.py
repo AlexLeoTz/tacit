@@ -6,15 +6,16 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import json
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .embeddings import EmbeddingService
 from .vectordb import deserialize_f32, normalize, serialize_f32
-from ..utils.scope import scope_matches
+from ..utils.config import Config
+from ..utils.scope import node_matches_scope
 
 RRF_K = 60
 RETRIEVE_K = 50
-SCOPE_BOOST = 0.5
 RECENCY_HALF_LIFE_DAYS = 90
 
 #: How much authority may swing a result, as a multiplier floor. Scores are
@@ -243,7 +244,13 @@ def apply_boosts(
     now_ts: Optional[float] = None,
     authority: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float]]:
-    """Apply scope, recency and authority multipliers to fused RRF scores."""
+    """Apply scope filtering and recency/authority multipliers to fused RRF scores.
+
+    Scope is a FILTER here, matching the briefing: when the caller names the files
+    or directories it is working in, only memories scoped to them (plus
+    project-wide knowledge) are ranked. Scoring then applies recency and
+    PageRank authority.
+    """
     if not fused:
         return []
 
@@ -255,19 +262,30 @@ def apply_boosts(
     rows = conn.execute(sql, node_ids).fetchall()
     meta = {str(r[0]): (float(r[1]), str(r[2])) for r in rows}
 
+    project_root: Optional[Path] = None
+    try:
+        db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+        if db_path:
+            project_root = Config.project_root_for_db(db_path)
+    except Exception:
+        project_root = None
+
     boosted: List[Tuple[str, float]] = []
     for node_id, rrf_score in fused.items():
         mult = 1.0
         ts, scope_json = meta.get(node_id, (now_ts, "[]"))
 
-        # Multiplicative scope boost
-        if scope_hint and scope_json:
+        if scope_hint:
             try:
-                node_scope = json.loads(scope_json)
+                node_scope = json.loads(scope_json) if scope_json else []
             except (TypeError, ValueError):
                 node_scope = []
-            if scope_matches(node_scope if isinstance(node_scope, list) else [], scope_hint):
-                mult *= (1.0 + SCOPE_BOOST)
+            if not node_matches_scope(
+                node_scope if isinstance(node_scope, list) else [],
+                scope_hint,
+                project_root=project_root,
+            ):
+                continue
 
         # Gentle recency half-life decay (90 days)
         age_days = max(0.0, (now_ts - ts) / 86400.0)
@@ -311,9 +329,23 @@ class HybridSearchEngine:
         if not q:
             status_clause = "status IN ('active', 'superseded')" if include_superseded else "status = 'active'"
             sql = f"SELECT * FROM memories WHERE {status_clause} ORDER BY timestamp DESC LIMIT ?"
-            rows = conn.execute(sql, (limit,)).fetchall()
+            rows = conn.execute(sql, (limit if not scope_hint else RETRIEVE_K,)).fetchall()
             from ..core.memory_node import MemoryNode
-            return [{"node": MemoryNode.from_dict(dict(r)), "score": 1.0, "provenance": {"mode": "recent"}} for r in rows]
+            recent = [MemoryNode.from_dict(dict(r)) for r in rows]
+            if scope_hint:
+                # An empty query is still a scoped read: filter before truncating.
+                project_root: Optional[Path] = None
+                try:
+                    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+                    if db_path:
+                        project_root = Config.project_root_for_db(db_path)
+                except Exception:
+                    project_root = None
+                recent = [
+                    node for node in recent
+                    if node_matches_scope(node.scope or [], scope_hint, project_root=project_root)
+                ][:limit]
+            return [{"node": node, "score": 1.0, "provenance": {"mode": "recent"}} for node in recent]
 
         embed_svc = EmbeddingService.get()
         use_vectors = (mode == "hybrid" and embed_svc.available)

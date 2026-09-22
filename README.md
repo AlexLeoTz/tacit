@@ -492,18 +492,26 @@ tacit dashboard --project /path/to/another-project
 
 ## 6. MCP Tools Reference
 
-When connected via MCP, AI agents have access to the following 6 tools:
+When connected via MCP, AI agents have access to the following tools:
 
 | Tool | Purpose | Key Arguments |
 |---|---|---|
-| `memory_add` | Persist an immutable decision, command, hack, architecture, or error. Supports auto-linking and orphan warnings. | `content`, `type`, `summary`, `tags`, `impact`, `parents`, `supersedes`, `relation_note` |
+| `memory_add` | Persist an immutable decision, command, hack, architecture, or error. `scope` is mandatory in practice: it is the filter future reads apply. | `content`, `type`, `summary`, `title`, `tags`, `scope`, `impact`, `parents`, `supersedes`, `relation_note`, `project` |
 | `memory_link` | Explicitly attach or adjust causal edges between nodes (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
-| `memory_search` | Hybrid search (BM25 + dense vectors via RRF), ranked by relevance × PageRank authority. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug` |
-| `memory_get` | Fetch markdown content and Merkle lineage by exact UUID. Shows alert banners if superseded or retracted. | `node_id` |
-| `memory_grep` | Literal case-insensitive substring match over titles and summaries only. No embeddings, no content scan, so it works when the provider is unavailable. | `keyword`, `type`, `limit`, `include_superseded` |
-| `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `type` |
-| `memory_context` | Generate a token-budgeted project briefing ranked by PageRank authority (impact and recency as bounded tie-breakers). | `budget`, `scope_hint`, `timeframe` |
+| `memory_search` | Hybrid search (BM25 + dense vectors via RRF), ranked by relevance × PageRank authority, filtered by scope. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug`, `project` |
+| `memory_get` | Fetch markdown content and Merkle lineage by exact UUID. Shows alert banners if superseded or retracted. | `node_id`, `project` |
+| `memory_grep` | Literal case-insensitive substring match over titles and summaries only. No embeddings, no content scan, so it works when the provider is unavailable. | `keyword`, `type`, `limit`, `include_superseded`, `scope_hint`, `project` |
+| `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `scope_hint`, `project` |
+| `memory_context` | Generate a token-budgeted project briefing ranked by PageRank authority (impact and recency as bounded tie-breakers). | `budget`, `scope_hint`, `timeframe`, `project` |
+| `project_structure` | The captured workspace map — directories and file names, never source — annotated with stored per-file gists. | `refresh`, `path`, `include_gists`, `max_lines`, `project` |
+| `project_gist` | Record a one-line note about what a file contains, shown beside it in the map. | `path`, `gist`, `author`, `project` |
 | `memory_projects`| List all registered project workspaces across your machine. | None |
+
+### Scope is a filter, and `project` selects the workspace
+
+* **`scope_hint` filters.** Only memories recorded against those paths — plus project-wide memories — are returned. Omitting it reads the **whole workspace**. An empty answer names the scope that emptied it, so a wrong scope is never mistaken for missing knowledge.
+* **`project` names the workspace.** Always pass your workspace root: one Tacit MCP server can serve several workspaces at once, and without `project` a call can only fall back to the directory the server was launched in.
+* **Tacit never invents a store.** If the launch directory is a container — a home directory, drive root, system or temp folder — or has no project marker at all (`.tacit`, `.git`, `pyproject.toml`, `package.json`), `tacit mcp` refuses to create a store there and every call without `project` reports it, rather than letting one store answer for every workspace underneath.
 
 > Deletion is restricted to developers via the CLI (`tacit delete <id>`) or Dashboard UI to prevent AI agents from removing historical institutional memory.
 
@@ -511,9 +519,11 @@ When connected via MCP, AI agents have access to the following 6 tools:
 
 ## 7. Multi-Project Support
 
-Tacit keeps each codebase memories isolated:
+Tacit keeps each codebase's memories isolated:
 - Every project stores its database at `<project-root>/.tacit/memory.db`.
 - Auto-detects the project root from `.git`, `package.json`, `pyproject.toml`, or `.tacit`.
+- A workspace root may hold several repositories (`backend/` + `frontend/`): Tacit discovers them by looking for `.git`, or you can pin them explicitly with `tacit structure --set-repos backend,frontend`.
+- Container directories (home, drive root, system or temp folders) are never treated as a project root, and neither is a directory with no project marker, so unrelated workspaces cannot end up sharing one store. `tacit init` is the one command that may create a project in a plain directory.
 - Track all projects on your machine with:
   ```bash
   tacit projects
@@ -521,7 +531,26 @@ Tacit keeps each codebase memories isolated:
 
 ---
 
-## 8. Testing
+## 8. Project Structure Map
+
+`tacit init` offers to keep a **project structure snapshot** for the workspace: directory and file **names only, never source code or secrets**, stored at `<store>/project-tree.json`. It lets a new agent session learn the layout in a single call instead of exploring file by file.
+
+```bash
+tacit structure                 # print the captured map
+tacit structure --refresh       # re-walk the filesystem and update it
+tacit structure --path backend  # narrow the map to a subdirectory
+tacit structure --repos         # list the git repositories discovered
+tacit structure --set-repos backend,frontend
+tacit structure --enable | --disable
+```
+
+Agents read it with the `project_structure` tool and attach what they learn about individual files with `project_gist(path="backend/app/Models/Film.php", gist="Eloquent model for films")`. Those one-line gists then appear beside the file name in every later map.
+
+Dependency trees, build output and caches (`node_modules`, `vendor`, `.venv`, `dist`, `.git`, …) are skipped; `.env` and other dotfiles are included because they are part of the layout.
+
+---
+
+## 9. Testing
 
 Run the test suite using `pytest`:
 

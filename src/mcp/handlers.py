@@ -1,16 +1,43 @@
 """Tool execution handlers for Model Context Protocol (MCP) integrations with Multi-Project support."""
 
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from ..core.memory_node import MemoryNode
 from ..core.storage import MemoryStorage
 from ..search.full_text import FullTextSearch
 from ..search.temporal import TemporalSearch
-from ..utils.config import Config
-from ..utils.scope import resolve_scope_hints
+from ..utils.config import Config, ProjectRootError
+from ..utils.scope import node_matches_scope, resolve_scope_hints
+
+
+def _guarded(method: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
+    """Turn a refused project root into an actionable tool result.
+
+    A server started without a workspace must not answer from whichever store
+    happens to sit above its working directory; every call instead reports how to
+    name the project, which is visible to the agent in the tool result.
+    """
+
+    @wraps(method)
+    def wrapper(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        try:
+            return method(self, *args, **kwargs)
+        except ProjectRootError as exc:
+            message = f"[TACIT] {exc}"
+            return {
+                "error": str(exc),
+                "count": 0,
+                "results": [],
+                "success": False,
+                "message": message,
+                "formatted": message,
+            }
+
+    return wrapper
 
 
 class MemoryMCPHandlers:
@@ -20,8 +47,12 @@ class MemoryMCPHandlers:
         self,
         default_storage: Optional[MemoryStorage] = None,
         project_root: Optional[Path] = None,
+        unresolved_reason: Optional[str] = None,
     ):
         self._storage_cache: Dict[str, MemoryStorage] = {}
+        #: Which project root owns which database file, so scope hints resolve
+        #: against the project actually being read.
+        self._storage_roots: Dict[str, Path] = {}
         if default_storage:
             self._default_storage = default_storage
             # Cache default storage under its db path
@@ -32,6 +63,11 @@ class MemoryMCPHandlers:
         #: CWD on every call let a client that changes directory answer from a
         #: different project's database mid-session.
         self._project_root = Path(project_root).resolve() if project_root else None
+        if default_storage and self._project_root is not None:
+            self._storage_roots[str(Path(default_storage.db_path).resolve())] = self._project_root
+        #: Set when no workspace could be identified at startup. Calls that name a
+        #: project explicitly still work; the rest report this instead of guessing.
+        self._unresolved_reason = unresolved_reason
 
     @property
     def project_root(self) -> Path:
@@ -60,6 +96,8 @@ class MemoryMCPHandlers:
         else:
             # No explicit project: use the pinned workspace rather than whatever
             # the CWD happens to be at call time.
+            if self._unresolved_reason:
+                raise ProjectRootError(self._unresolved_reason)
             project_root = self.project_root
 
         key = str(project_root.resolve())
@@ -70,9 +108,44 @@ class MemoryMCPHandlers:
             Config.ensure_directories(project_root)
             db_path = Config.get_db_path(project_root)
             self._storage_cache[key] = MemoryStorage(db_path)
+            self._storage_roots[str(db_path.resolve())] = Path(project_root).resolve()
 
         return self._storage_cache[key]
 
+    def _root_for(self, storage: MemoryStorage) -> Path:
+        """The project root that owns ``storage`` — scope hints are relative to it.
+
+        A caller may name a different project per call, so the hints must be
+        sanitised against *that* root rather than the one pinned at startup.
+        """
+        try:
+            key = str(Path(storage.db_path).resolve())
+        except (OSError, TypeError):
+            return self.project_root
+        recorded = self._storage_roots.get(key)
+        if recorded is not None:
+            return recorded
+        if self._project_root is not None:
+            return self._project_root
+        return self.project_root
+
+    @staticmethod
+    def _no_match_message(prefix: str, scope: Optional[List[str]]) -> str:
+        """Explain an empty result, naming the scope filter that emptied it.
+
+        Scope is a filter, so an empty answer is often correct rather than a bug;
+        saying which scope produced it (and how to widen it) prevents an agent
+        from concluding the memory does not exist.
+        """
+        if not scope:
+            return prefix + "."
+        return (
+            f"{prefix} within scope [{', '.join(scope)}].\n"
+            "Scope filters memories: entries recorded against other subsystems are "
+            "excluded. Retry without scope_hint to read the whole workspace."
+        )
+
+    @_guarded
     def handle_memory_add(
         self,
         content: str,
@@ -92,8 +165,20 @@ class MemoryMCPHandlers:
     ) -> Dict[str, Any]:
         """Create and store an immutable memory node in target project storage."""
         storage = self._resolve_storage(project)
+        project_root = self._root_for(storage)
         tags = tags or []
-        scope = scope or []
+        # Scope is mandatory: it is the filter every read applies, so an unscoped
+        # memory would be invisible to every scoped briefing. Fall back to the
+        # project's own name, which every scope filter keeps (project-wide).
+        scope = [str(entry).strip() for entry in (scope or []) if str(entry).strip()]
+        scope_notice = ""
+        if not scope:
+            scope = [project_root.name]
+            scope_notice = (
+                f"\n[TACIT SCOPE NOTICE] No `scope` was supplied, so this entry was recorded as "
+                f"project-wide knowledge for '{project_root.name}'. Pass the file or directory "
+                "paths it affects (or the project name) next time."
+            )
         parents = parents or []
         supersedes = supersedes or []
         related = related or []
@@ -141,9 +226,17 @@ class MemoryMCPHandlers:
                         f"  `memory_link(child_id=\"{{node_id_placeholder}}\", parent_id=\"<candidate-id>\")`"
                     )
 
-        # Validate scope paths exist in target project root
+        # Validate scope paths against the root that will own the memory, not
+        # against whatever the process CWD happens to resolve to.
         from ..core.memory_node import validate_scope_paths
-        validate_scope_paths(scope, project)
+        try:
+            validate_scope_paths(scope, str(project_root))
+        except ValueError as exc:
+            return {
+                "success": False,
+                "scope": scope,
+                "message": f"[TACIT] Memory NOT recorded: {exc}",
+            }
 
         node_id = str(uuid.uuid4())
         if warning_msg:
@@ -194,6 +287,7 @@ class MemoryMCPHandlers:
                 "id": node.id,
                 "summary": node.summary,
                 "type": node.type,
+                "scope": scope,
                 "parents": parents,
                 "supersedes": supersedes,
                 "content_hash": node.content_hash,
@@ -201,15 +295,17 @@ class MemoryMCPHandlers:
                     {"id": c["node"].id, "summary": c["node"].summary, "type": c["node"].type, "score": c["score"]}
                     for c in suggested_candidates
                 ],
-                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}{warning_msg}{title_notice}",
+                "message": f"Memory recorded [{node.type}]{proj_label}{sup_label}: {node.summary} (ID: {node.id}){linked_hint}{warning_msg}{title_notice}{scope_notice}",
             }
         else:
             return {
                 "success": False,
                 "id": node.id,
+                "scope": scope,
                 "message": f"Failed to record memory{proj_label}: duplicate or integrity error.",
             }
 
+    @_guarded
     def handle_memory_link(
         self,
         child_id: str,
@@ -242,6 +338,7 @@ class MemoryMCPHandlers:
                 "message": f"Failed to link `{child_id}` -> `{parent_id}`: one or both nodes do not exist.",
             }
 
+    @_guarded
     def handle_memory_add_batch(
         self,
         entries: List[Dict[str, Any]],
@@ -317,6 +414,7 @@ class MemoryMCPHandlers:
             "message": f"Recorded {len(created_nodes)}/{len(entries)} memory entries in batch:\n" + "\n".join(f"- {m}" for m in messages),
         }
 
+    @_guarded
     def handle_memory_search(
         self,
         query: str,
@@ -333,7 +431,7 @@ class MemoryMCPHandlers:
         storage = self._resolve_storage(project)
         # Sanitise whatever the agent passed: absolute paths outside this project
         # are dropped, and with no usable hint the active directory is inferred.
-        scope_hint = resolve_scope_hints(scope_hint, project_root=self.project_root)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
         results = storage.search_hybrid(
             query=query,
             limit=limit,
@@ -345,11 +443,13 @@ class MemoryMCPHandlers:
             debug=debug,
         )
         if not results:
-            proj_hint = f" in project '{project}'" if project else ""
             return {
                 "count": 0,
                 "results": [],
-                "formatted": f"No memory entries found matching query: '{query}'{proj_hint}",
+                "scope": scope_hint,
+                "formatted": self._no_match_message(
+                    f"No memory entries found matching query: '{query}'", scope_hint
+                ),
             }
 
         formatted_lines = [f"Found {len(results)} memory entries for '{query}':\n"]
@@ -390,6 +490,7 @@ class MemoryMCPHandlers:
             "formatted": "\n".join(formatted_lines),
         }
 
+    @_guarded
     def handle_memory_get(self, node_id: str, project: Optional[str] = None) -> Dict[str, Any]:
         """Retrieve full details of a single memory by exact UUID, with its lineage.
 
@@ -499,6 +600,7 @@ Merkle Root: {node.merkle_root}
             "formatted": formatted,
         }
 
+    @_guarded
     def handle_memory_grep(
         self,
         keyword: str,
@@ -506,6 +608,7 @@ Merkle Root: {node.merkle_root}
         limit: int = 50,
         include_superseded: bool = False,
         project: Optional[str] = None,
+        scope_hint: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Find memories whose title or summary contains ``keyword`` (substring).
 
@@ -514,23 +617,25 @@ Merkle Root: {node.merkle_root}
         symbol when semantic search is unavailable or too fuzzy.
         """
         storage = self._resolve_storage(project)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
         matches = storage.grep_memories(
             keyword,
             limit=limit,
             memory_type=type,
             include_superseded=include_superseded,
+            scope_hint=scope_hint,
         )
 
         if not matches:
-            proj_hint = f" in project '{project}'" if project else ""
             return {
                 "count": 0,
                 "results": [],
-                "formatted": (
-                    f"No memory title or summary contains '{keyword}'{proj_hint}.\n"
-                    "grep matches titles and summaries only; use memory_search to search "
-                    "content semantically."
-                ),
+                "scope": scope_hint,
+                "formatted": self._no_match_message(
+                    f"No memory title or summary contains '{keyword}'", scope_hint
+                )
+                + "\ngrep matches titles and summaries only; use memory_search to search "
+                "content semantically.",
             }
 
         needle = keyword.strip().lower()
@@ -555,18 +660,33 @@ Merkle Root: {node.merkle_root}
 
         return {"count": len(matches), "results": items, "formatted": "\n".join(lines)}
 
+    @_guarded
     def handle_memory_recent(
-        self, days: int = 7, limit: int = 20, project: Optional[str] = None
+        self,
+        days: int = 7,
+        limit: int = 20,
+        project: Optional[str] = None,
+        scope_hint: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Get recent memory items within the specified days in target project."""
         storage = self._resolve_storage(project)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
         temporal = TemporalSearch(storage)
-        recent = temporal.get_recent(days=days, limit=limit)
+        recent = temporal.get_recent(days=days, limit=limit * 5 if scope_hint else limit)
+        if scope_hint:
+            project_root = Config.project_root_for_db(storage.db_path)
+            recent = [
+                node for node in recent
+                if node_matches_scope(node.scope or [], scope_hint, project_root=project_root)
+            ][:limit]
         if not recent:
             return {
                 "count": 0,
                 "results": [],
-                "formatted": f"No memory entries recorded in the last {days} days.",
+                "scope": scope_hint,
+                "formatted": self._no_match_message(
+                    f"No memory entries recorded in the last {days} days", scope_hint
+                ),
             }
 
         lines = [f"Recent Memories (Last {days} days - {len(recent)} entries):\n"]
@@ -587,6 +707,7 @@ Merkle Root: {node.merkle_root}
             "formatted": "\n".join(lines),
         }
 
+    @_guarded
     def handle_memory_context(
         self,
         timeframe: str = "all",
@@ -597,7 +718,7 @@ Merkle Root: {node.merkle_root}
         """Aggregate relevance-ranked, token-budgeted institutional briefing for agent session bootstrap."""
         from ..core.bootstrap import BootstrapEngine
         storage = self._resolve_storage(project)
-        scope_hint = resolve_scope_hints(scope_hint, project_root=self.project_root)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
         briefing_res = BootstrapEngine.generate_briefing(
             storage=storage,
             budget=budget if budget is not None else Config.TOKEN_BUDGET,
@@ -606,6 +727,117 @@ Merkle Root: {node.merkle_root}
         )
         return briefing_res
 
+    @_guarded
+    def handle_project_structure(
+        self,
+        refresh: bool = False,
+        path: str = "",
+        include_gists: bool = True,
+        max_lines: int = 400,
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the workspace's structural map (names and nesting, never source).
+
+        Captured at ``tacit init`` and refreshable: this is what lets a new
+        session learn where things live in one call instead of exploring.
+        """
+        from ..core import project_tree
+
+        storage = self._resolve_storage(project)
+        root = self._root_for(storage)
+        store_dir = Config.get_memory_dir(root)
+
+        if refresh:
+            # Asking for a refresh is a request for the map to exist: never
+            # rebuild a snapshot the workspace has switched off.
+            project_tree.update_tree_settings(store_dir, enabled=True)
+            project_tree.refresh_snapshot(root, store_dir)
+
+        text = project_tree.render_stored(
+            root,
+            store_dir,
+            path_prefix=path,
+            include_gists=include_gists,
+            max_lines=max(20, int(max_lines or 400)),
+        )
+        snapshot = project_tree.load_snapshot(store_dir) or {}
+        settings = project_tree.tree_settings(store_dir)
+        if snapshot and not settings.get("enabled"):
+            text += (
+                "\n(Project-tree capture is disabled for this workspace. "
+                "Enable it with `tacit structure --enable`.)"
+            )
+        return {
+            "count": int(snapshot.get("entry_count") or 0),
+            "repos": snapshot.get("repos") or [],
+            "project": str(root),
+            "formatted": text,
+        }
+
+    @_guarded
+    def handle_project_gist(
+        self,
+        path: str,
+        gist: str = "",
+        author: str = "ai-agent",
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Attach (or clear) a one-line note describing what a file contains."""
+        from ..core import project_tree
+
+        storage = self._resolve_storage(project)
+        root = self._root_for(storage)
+        store_dir = Config.get_memory_dir(root)
+
+        raw = str(path or "").replace("\\", "/").strip()
+        if not raw:
+            return {
+                "success": False,
+                "message": "[TACIT] project_gist needs a `path` relative to the project root.",
+            }
+        relative = raw.lstrip("/")
+        target = (root / relative)
+        try:
+            exists = target.exists()
+        except OSError:
+            exists = False
+        if not exists:
+            return {
+                "success": False,
+                "path": relative,
+                "message": (
+                    f"[TACIT] No such file or directory: '{relative}' under {root}. "
+                    "Gists are keyed by project-relative path, and the path must exist."
+                ),
+            }
+
+        try:
+            stored = project_tree.set_gist(store_dir, relative, gist, author=author)
+        except OSError as exc:
+            return {
+                "success": False,
+                "path": relative,
+                "message": f"[TACIT] Could not store the gist: {exc}",
+            }
+
+        if stored is None:
+            return {
+                "success": True,
+                "path": relative,
+                "removed": True,
+                "message": f"Gist removed for '{relative}'.",
+            }
+        return {
+            "success": True,
+            "path": relative,
+            "gist": stored["gist"],
+            "message": (
+                f"Gist recorded for '{relative}': {stored['gist']}\n"
+                "It now appears beside that file in `project_structure`."
+            ),
+        }
+
+    @_guarded
     def handle_memory_projects(self) -> Dict[str, Any]:
         """List all discovered / registered project workspaces and their memory counts."""
         registered = Config.list_registered_projects()
@@ -641,6 +873,7 @@ Merkle Root: {node.merkle_root}
             "formatted": "\n".join(formatted_lines),
         }
 
+    @_guarded
     def handle_memory_delete(self, node_id: str, project: Optional[str] = None) -> Dict[str, Any]:
         """Delete a memory node by ID from the project."""
         storage = self._resolve_storage(project)
@@ -658,6 +891,7 @@ Merkle Root: {node.merkle_root}
                 "message": f"Memory node `{node_id}` not found or could not be deleted.",
             }
 
+    @_guarded
     def handle_memory_clear(self, project: Optional[str] = None) -> Dict[str, Any]:
         """Clear all memories in a project."""
         storage = self._resolve_storage(project)

@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import threading
 
 from .memory_node import MemoryNode
+from ..utils.config import Config
+from ..utils.scope import node_matches_scope
 
 
 def _escape_like(text: str) -> str:
@@ -336,6 +338,7 @@ class MemoryStorage:
         limit: int = 50,
         memory_type: Optional[str] = None,
         include_superseded: bool = False,
+        scope_hint: Optional[List[str]] = None,
     ) -> List[MemoryNode]:
         """Substring search across titles and summaries only.
 
@@ -343,6 +346,9 @@ class MemoryStorage:
         partial words and symbols (``WinError``, ``pgvector``) that tokenised
         search splits or misses, and it must not reach into full content --
         searching bodies would make it a worse ``search``.
+
+        ``scope_hint`` filters the matches (project-wide memories included), so a
+        scoped grep cannot surface another subsystem's nodes.
         """
         needle = (keyword or "").strip()
         if not needle:
@@ -359,7 +365,8 @@ class MemoryStorage:
             params.append(memory_type)
 
         # Title hits first, then most recent: a title match is what was asked for.
-        params.extend([pattern, max(1, limit)])
+        # Over-fetch when filtering by scope so the limit still holds after it.
+        params.extend([pattern, max(1, limit) * (5 if scope_hint else 1)])
 
         with self._lock:
             conn = self._get_connection()
@@ -374,9 +381,17 @@ class MemoryStorage:
                     """,
                     params,
                 ).fetchall()
-                return [MemoryNode.from_dict(dict(row)) for row in rows]
+                nodes = [MemoryNode.from_dict(dict(row)) for row in rows]
             finally:
                 conn.close()
+
+        if scope_hint:
+            project_root = Config.project_root_for_db(self.db_path)
+            nodes = [
+                node for node in nodes
+                if node_matches_scope(node.scope or [], scope_hint, project_root=project_root)
+            ]
+        return nodes[:limit]
 
     def search_full_text(
         self, query: str, limit: int = 10, memory_type: Optional[str] = None

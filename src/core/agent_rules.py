@@ -12,10 +12,21 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **Record Every Completed Task (Distilled)**: Every task that changes the codebase MUST end with a Tacit write — see the Mandatory Task Completion Protocol below. Capture design choices, undocumented workarounds (hacks), environment dependencies, operational commands, and resolved error caveats.
 * **NEVER Store Chat History, Logs, or Code Snippets**: Do not pollute the memory database with conversation transcripts, raw terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
 
-## Scope: Let Tacit Decide
-* **Do NOT construct `scope_hint` values yourself.** Absolute paths, Windows escaping and trailing separators are easy to get wrong, and a wrong path silently changes ranking. **Omit `scope_hint` entirely** — Tacit infers the active scope from the directory it runs in.
-* If you do pass one, use a **project-relative path** (`src/api`, `backend/jobs`), never an absolute path. Absolute paths outside the project are ignored.
-* When *recording* a memory, always set `scope` explicitly to the affected folders or files (e.g. `['src/api/auth.py']`). Recording is the one place a precise path is required, and those paths must exist in the codebase.
+## Scope: A Filter, Not a Hint
+* **`scope_hint` filters what you receive.** Only memories whose recorded `scope` matches the paths you pass — plus project-wide memories — are returned. Omitting it reads the **whole workspace**; passing it reads **only that subsystem**. Reading `backend/app` therefore can never surface `frontend/` memories, and memories from another repository can never appear at all.
+* **Pass `scope_hint` when you are working inside a subsystem** (the file or directory you are editing), so the briefing is about your area instead of the whole repository. Use a **project-relative path** (`src/api`, `backend/app/Livewire/Admin`); never an absolute path — absolute paths outside the project are rejected outright.
+* **An empty result may be correct.** If a scoped read returns nothing, Tacit says which scope emptied it: retry without `scope_hint` to read the whole workspace before concluding the knowledge does not exist.
+* **When recording, `scope` is mandatory and is never empty.** It is the filter future sessions apply, so a missing or wrong scope makes the memory unfindable. Give the affected folders or files (e.g. `['src/api/auth.py']`, or a directory such as `backend/app/Models`), and use the **project name** for knowledge that applies to the whole workspace. Paths are validated against the project root: a typo is rejected rather than stored.
+
+## Orient Before You Explore: `project_structure`
+* **Call `project_structure` once when you start working in an unfamiliar area.** It returns the captured workspace map — directories and file names, plus any stored per-file gist — so you learn where things live without opening files one by one. It never contains source code.
+* **Do not re-render it habitually**: the map is a snapshot. Pass `refresh=true` only after files were added, renamed or deleted, and `path` to narrow it to the directory you care about.
+* **Record what you learn with `project_gist(path=..., gist=...)`** whenever you work out what a file is for (one informative sentence, project-relative path). The next session then inherits that knowledge beside the file name instead of re-reading the file. A gist is a map label, not a summary of a whole subsystem.
+* If the map is missing or stale beyond your change, `tacit structure --refresh` (CLI) rebuilds it; `tacit structure --set-repos backend,frontend` pins the repositories tracked in a multi-repo workspace.
+
+## Choose Your Workspace (`project`)
+* **Always pass `project` with your workspace root** (e.g. `project="D:\\\\work\\\\shop"`) on every Tacit call. One Tacit MCP server can serve several workspaces at once; without `project` a call can only fall back to the directory the server was launched in, which may be a different repository.
+* If a Tacit call reports **no workspace identified**, that is the reason: re-issue it with `project` set to your workspace root.
 
 ## Writing Titles (they are the search index):
 * **Every entry MUST have a `title`, and it must be specific.** Only the **title, tags and summary** are embedded into the vector index — the full `content` is not. A vague title therefore makes a memory effectively unfindable by semantic search, no matter how good the content is.
@@ -100,11 +111,12 @@ Confusable pairs — resolve them this way:
 * **Heed Interactive Warnings**: If `memory_add` responds with a `[TACIT GRAPH NOTICE]` suggesting candidate parents, immediately review them and call `memory_link(child_id=..., parent_id=...)` to preserve graph lineage.
 
 ## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context()` to load relevance-ranked decisions, active hacks, and solved errors into your context.
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(project=<your workspace root>)` to load relevance-ranked decisions, active hacks, and solved errors into your context. Add `scope_hint` when the task is confined to one subsystem.
 2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.
 3. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
+   - `project`: Your workspace root, so the entry lands in this repository's store.
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
-   - `scope`: Affected folder or subsystem (e.g. ['/api/auth']). Ensure paths actually exist in the codebase.
+   - `scope`: The affected folder or subsystem, relative to the project root (e.g. ['backend/app/Models'], or the project name for workspace-wide knowledge). This is mandatory: it is the filter every future read applies. Paths must exist in the project or the write is rejected.
    - `parents`: Link the UUID(s) of any past memories from `memory_context` that this entry modifies, extends, or is derived from.
    - `supersedes`: Link the UUID(s) of any past decisions that this change directly invalidates or replaces.
 4. **Mandatory Task Completion Protocol (Document Every Completed Task)**:

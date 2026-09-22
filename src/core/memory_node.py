@@ -195,7 +195,20 @@ class MemoryNode:
 
 
 def validate_scope_paths(scope: List[str], project_path: Optional[str] = None) -> None:
-    """Validate that scope paths exist in the codebase."""
+    """Validate that scope paths exist in the codebase.
+
+    Scope is the filter every read applies, so a scope entry that does not exist
+    makes the memory unreachable - a typo is worth failing on, loudly, while the
+    agent still has the context to fix it. Three shapes are accepted:
+
+    * the project's own directory name (project-wide knowledge, what Tacit
+      auto-fills when an agent supplies no scope),
+    * a path relative to the project root, and
+    * an absolute path inside the project.
+
+    ``project_path`` should be the root that will store the memory. When omitted,
+    discovery from the current directory is used as before.
+    """
     if not scope:
         return
 
@@ -209,24 +222,39 @@ def validate_scope_paths(scope: List[str], project_path: Optional[str] = None) -
 
     try:
         project_root = Config.find_project_root(project_path)
+        project_root = Path(project_root).resolve()
     except Exception:
         project_root = Path.cwd()
 
-    for path_str in scope:
-        # Clean trailing/leading slashes/spaces
-        clean_str = path_str.strip().lstrip("/").rstrip("\\").lstrip("\\").rstrip("/")
-        target_path = Path(clean_str)
-        
-        # Resolve relative to project root
-        full_path = (project_root / target_path).resolve()
-        
-        # Also try relative to current working directory or absolute
-        if not full_path.exists():
-            fallback_path = Path(path_str).resolve()
-            if fallback_path.exists():
-                full_path = fallback_path
+    project_name = project_root.name.lower()
+    invalid: List[str] = []
 
-        if not full_path.exists():
-            raise ValueError(
-                f"Scope path '{path_str}' does not exist as a file or directory in the codebase."
-            )
+    for path_str in scope:
+        text = str(path_str).strip()
+        if not text:
+            continue
+        # The project's own name means "the whole project"; it is not a path.
+        if text.strip("/\\.").lower() in (project_name, "*"):
+            continue
+
+        clean_str = text.replace("\\", "/").strip("/")
+        candidates = [(project_root / clean_str)]
+        absolute = Path(text)
+        if absolute.is_absolute():
+            candidates.append(absolute)
+        else:
+            candidates.append(Path.cwd() / clean_str)
+
+        if not any(candidate.exists() for candidate in candidates):
+            invalid.append(text)
+
+    if invalid:
+        listed = ", ".join(f"'{entry}'" for entry in invalid)
+        raise ValueError(
+            f"Scope path(s) {listed} do not exist under the project root "
+            f"'{project_root}'.\n"
+            "Scope is a filter: a memory stored against a non-existent path could "
+            "never be found again. Use paths that exist (a directory is enough), or "
+            f"the project name '{project_root.name}' for knowledge that applies to "
+            "the whole workspace."
+        )

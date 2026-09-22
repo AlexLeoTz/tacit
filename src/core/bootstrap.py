@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from .authority import compute_authority
 from .memory_node import MemoryNode
 from ..utils.config import Config
-from ..utils.scope import scope_matches
+from ..utils.scope import node_matches_scope
 
 
 # ==============================================================================
@@ -41,7 +41,6 @@ IMPACT_SCORES = {
 RECENCY_HALF_LIFE_DAYS = 180   # A memory loses half its recency score in 6 months
 PENALTY_MAX = 0.30             # Max deduction when a neighbor was superseded
 PENALTY_HALF_LIFE_DAYS = 60    # The deduction fades over ~2 months
-SCOPE_BOOST = 0.25             # Multiplier bonus when a node matches scope_hint
 
 TOKEN_BUDGET = Config.TOKEN_BUDGET
 FULL_TIER_BUDGET_FRACTION = 0.60  # 60% of budget -> full content, rest -> one-liners
@@ -311,6 +310,29 @@ class BootstrapEngine:
         return full, brief_by_tag
 
     @classmethod
+    def project_map_line(cls, storage: Any) -> str:
+        """One header line pointing at the captured project structure, if any.
+
+        The map itself is a separate tool call on purpose: a briefing must stay
+        inside its token budget, and an agent that only needs the layout should
+        not pay for memories (or vice versa).
+        """
+        try:
+            from . import project_tree
+
+            root = Config.project_root_for_db(storage.db_path)
+            store_dir = Config.get_memory_dir(root)
+            settings = project_tree.tree_settings(store_dir)
+            if not settings.get("enabled"):
+                return ""
+            summary = project_tree.snapshot_summary(store_dir)
+            if not summary:
+                return ""
+        except Exception:
+            return ""
+        return f"── Project map: {summary} · call project_structure ──"
+
+    @classmethod
     def generate_briefing(
         cls,
         storage: Any,
@@ -330,6 +352,7 @@ class BootstrapEngine:
         now_ts = now_dt.timestamp()
         date_str = now_dt.strftime("%Y-%m-%d %H:%M")
         cutoff_ts = parse_timeframe(timeframe, now_ts)
+        map_line = cls.project_map_line(storage)
 
         # Stage 1: Select active candidates
         active_nodes = storage.get_active_memories()
@@ -338,7 +361,7 @@ class BootstrapEngine:
                 "count": 0,
                 "full_count": 0,
                 "brief_count": 0,
-                "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n\n(No active institutional memories found. Project starts with empty context.)\n═══════════════════════════════════════════════════════",
+                "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n{map_line}\n(No active institutional memories found. Project starts with empty context.)\n═══════════════════════════════════════════════════════",
                 "full": [],
                 "brief": {},
             }
@@ -384,9 +407,41 @@ class BootstrapEngine:
                 "brief": {},
             }
 
-        hints = [h.strip().lower() for h in (scope_hint or []) if h and h.strip()]
+        hints = [h.strip() for h in (scope_hint or []) if h and h.strip()]
+        project_root = None
+        try:
+            project_root = Config.project_root_for_db(storage.db_path)
+        except Exception:
+            project_root = None
+        # Stage 3: Score all candidates.
+        #
+        # Scope is a FILTER: a caller working in `backend/app` is not shown
+        # memories recorded against `frontend/`, so a briefing can never mix
+        # subsystems (or, when a store was wrongly shared, repositories).
+        # Project-wide memories are the exception - they belong everywhere.
+        if hints:
+            candidates = [
+                node for node in candidates
+                if node_matches_scope(node.scope or [], hints, project_root=project_root)
+            ]
+            if not candidates:
+                scope_text = ", ".join(hints)
+                return {
+                    "count": 0,
+                    "full_count": 0,
+                    "brief_count": 0,
+                    "scope": hints,
+                    "formatted": (
+                        f"════ PROJECT BRIEFING · generated {date_str} ════\n\n"
+                        f"(No active memories are scoped to [{scope_text}].)\n"
+                        "Scope filters memories; other subsystems are excluded by design.\n"
+                        "Retry without scope_hint to brief on the whole workspace.\n"
+                        "═══════════════════════════════════════════════════════"
+                    ),
+                    "full": [],
+                    "brief": {},
+                }
 
-        # Stage 3: Score all candidates
         scored_candidates: List[Tuple[float, MemoryNode, Features]] = []
         for node in candidates:
             features = cls.compute_node_features(
@@ -397,8 +452,6 @@ class BootstrapEngine:
                 neighbor_map=neighbor_map,
             )
             score_val = cls.score(features, node.type)
-            if hints and scope_matches(node.scope or [], hints):
-                score_val *= 1.0 + SCOPE_BOOST
             # Drop negatively scored nodes (actively misleading)
             if score_val >= 0.0:
                 scored_candidates.append((score_val, node, features))
@@ -422,6 +475,7 @@ class BootstrapEngine:
         # Stage 6: Render output briefing
         lines = [
             f"════ PROJECT BRIEFING · generated {date_str} ════\n",
+            map_line,
             "── Core context (read fully) ──────────────────────────",
         ]
 
@@ -445,6 +499,8 @@ class BootstrapEngine:
             "count": len(full_tier) + total_brief,
             "full_count": len(full_tier),
             "brief_count": total_brief,
+            "scope": hints,
+            "project": str(project_root) if project_root else None,
             "formatted": briefing_text,
             "full": [item.node.to_dict() for item in full_tier],
             "brief": {tag: [item.node.to_dict() for item in items] for tag, items in brief_tier.items()},

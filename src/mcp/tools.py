@@ -43,7 +43,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Affected modules or file paths.",
+                    "description": "Affected modules or file paths, relative to the project root. Required in practice: scope is the filter later reads apply, so a memory recorded against the wrong path can never be found again. Use the project name for knowledge that applies to the whole workspace. Paths are validated and a non-existent path is rejected.",
                 },
                 "impact": {
                     "type": "string",
@@ -69,6 +69,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "relation_note": {
                     "type": "string",
                     "description": "Optional explanation for why this memory supersedes or derives from its parents.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to write to: absolute project root path or registered name. Pass your own workspace root.",
                 },
             },
             "required": ["content"],
@@ -139,7 +143,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope_hint": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional. Project-relative paths you are working on (e.g. 'src/api'). Omit it and Tacit uses your active directory. Absolute paths outside the project are ignored.",
+                    "description": "Optional. Project-relative paths you are working on (e.g. 'src/api'). Scope is a FILTER: only memories scoped to these paths (plus project-wide knowledge) are returned. Omit it to read the whole workspace. Absolute paths outside the project are ignored.",
                 },
                 "include_superseded": {
                     "type": "boolean",
@@ -150,6 +154,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "boolean",
                     "default": False,
                     "description": "Return BM25 and vector rank provenance for search tuning.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to read: an absolute path to the project root (or a registered project name). Pass your own workspace root; without it the server falls back to the workspace it was launched in.",
                 },
             },
             "required": ["query"],
@@ -164,6 +172,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "node_id": {
                     "type": "string",
                     "description": "The complete UUID of the memory node (not a prefix).",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to read from: absolute project root path or registered name.",
                 },
             },
             "required": ["node_id"],
@@ -194,6 +206,15 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "default": False,
                     "description": "Include memories that have been superseded.",
                 },
+                "scope_hint": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional. Project-relative paths to filter matches by; project-wide memories always match.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to search: absolute project root path or registered name.",
+                },
             },
             "required": ["keyword"],
         },
@@ -214,6 +235,15 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "default": 20,
                     "description": "Maximum number of recent entries to return.",
                 },
+                "scope_hint": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional. Project-relative paths to filter by.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to read: absolute project root path or registered name.",
+                },
             },
         },
     },
@@ -231,12 +261,16 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "scope_hint": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional. Project-relative paths you are working on; matching memories are boosted. Omit it and Tacit infers the scope from your active directory.",
+                    "description": "Optional. Project-relative paths to filter the briefing by: only memories scoped to these paths (plus project-wide knowledge) are shown. Omit it to brief on the whole workspace.",
                 },
                 "timeframe": {
                     "type": "string",
                     "default": "all",
                     "description": "Filter which memories may appear: 'all', 'week', '30d', '6h', 'year', or an ISO date. Ranking still uses the whole graph.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to brief on: absolute project root path or registered name. Pass your own workspace root.",
                 },
             },
         },
@@ -247,6 +281,65 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "project_structure",
+        "description": "Return the workspace STRUCTURE map: directories and file names only, never source code, annotated with any stored per-file gists. Call once at session start to learn where things live instead of exploring file by file. `refresh=true` re-walks the filesystem when files were added or renamed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Re-walk the filesystem and update the stored snapshot before rendering.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Optional project-relative subdirectory (or file) to narrow the map to.",
+                },
+                "include_gists": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Annotate files with their stored one-line gists.",
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "default": 400,
+                    "description": "Cap on rendered lines, so a huge workspace cannot flood the context.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace whose map to render: absolute project root path or registered name.",
+                },
+            },
+        },
+    },
+    {
+        "name": "project_gist",
+        "description": "Record a one-line gist of what a file contains, keyed by project-relative path. It is shown beside that file in project_structure, so the next session does not have to open the file to know its role. Pass an empty gist to remove it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative path of the file the gist describes (e.g. 'backend/app/Models/Film.php'). Must exist.",
+                },
+                "gist": {
+                    "type": "string",
+                    "description": "One informative sentence about the file's contents or role. Empty removes the gist.",
+                },
+                "author": {
+                    "type": "string",
+                    "default": "ai-agent",
+                    "description": "Who recorded the gist.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace the file belongs to: absolute project root path or registered name.",
+                },
+            },
+            "required": ["path"],
         },
     },
 ]

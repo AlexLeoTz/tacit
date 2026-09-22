@@ -395,7 +395,7 @@ def test_memory_grep_schema_matches_the_implementation(storage, tmp_dir, corpus)
 
     assert definition["inputSchema"]["required"] == ["keyword"]
     assert set(definition["inputSchema"]["properties"]) == {
-        "keyword", "type", "limit", "include_superseded"
+        "keyword", "type", "limit", "include_superseded", "scope_hint", "project"
     }
 
     handlers = MemoryMCPHandlers(default_storage=storage, project_root=tmp_dir)

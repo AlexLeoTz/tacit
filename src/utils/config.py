@@ -2,6 +2,7 @@
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
@@ -9,8 +10,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+class ProjectRootError(RuntimeError):
+    """Raised when Tacit cannot identify a real project to store memories for.
+
+    The failure mode this exists to prevent: a long-lived process (an MCP server,
+    a daemon, a shell started in the home directory) resolves "the project" to a
+    *container* directory — ``C:\\Users\\<name>``, a drive root, ``System32`` or a
+    temp folder — and silently creates ``.tacit`` there. Every later session
+    underneath it then reads and writes that one shared store, so a briefing
+    mixes memories from unrelated repositories.
+    """
+
+
 class Config:
     """Centralized configuration and multi-project resolver for Tacit."""
+
+    #: Files/directories whose presence marks a directory as a project root.
+    PROJECT_MARKERS = (".tacit", ".git", "pyproject.toml", "package.json")
 
     DEFAULT_MEMORY_DIR_NAME = ".tacit"
 
@@ -131,6 +147,146 @@ class Config:
 
         return current
 
+    # ------------------------------------------------------------------
+    # Project identity guards
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def has_project_marker(cls, path: Optional[str | Path] = None) -> bool:
+        """True when ``path`` looks like a project root (marker file/dir present)."""
+        try:
+            candidate = Path(path).expanduser() if path else Path.cwd()
+        except (OSError, TypeError):
+            return False
+        return any((candidate / marker).exists() for marker in cls.PROJECT_MARKERS)
+
+    @classmethod
+    def is_container_dir(cls, path: Optional[str | Path] = None) -> bool:
+        """True for directories that *contain* projects rather than being one.
+
+        Home directories, filesystem roots, Windows/Program Files/AppData trees
+        and temp folders. A store created in one of these is shared by every
+        unrelated workspace underneath it, which is exactly how memories from
+        different repositories ended up in a single briefing.
+        """
+        try:
+            candidate = Path(path).expanduser() if path else Path.cwd()
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError, TypeError):
+            return False
+
+        # Filesystem/drive root, e.g. C:\ or /
+        if resolved.parent == resolved:
+            return True
+
+        guarded: List[Path] = []
+        for var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)",
+                    "ProgramData"):
+            raw = os.environ.get(var)
+            if not raw:
+                continue
+            try:
+                guarded.append(Path(raw).resolve())
+            except (OSError, RuntimeError):
+                continue
+        try:
+            guarded.append(Path(tempfile.gettempdir()).resolve())
+        except (OSError, RuntimeError):
+            pass
+
+        for base in guarded:
+            if resolved == base or base in resolved.parents:
+                return True
+
+        # The home directory itself, but not the projects under it: a checkout in
+        # ~/Desktop or ~/code is a perfectly good project root.
+        try:
+            if resolved == Path.home().resolve():
+                return True
+        except (OSError, RuntimeError):
+            pass
+
+        # A directory that already contains a *registered* project is a container
+        # for projects, even though nothing static says so: `D:\work` holding
+        # several repos must not become a store just because an agent started
+        # there. The registry is read raw to avoid recursing back into this check.
+        try:
+            known = cls._load_projects_registry()
+        except Exception:
+            known = {}
+        for path_str in known.values():
+            try:
+                other = Path(path_str).expanduser().resolve()
+            except (OSError, RuntimeError):
+                continue
+            if other != resolved and resolved in other.parents:
+                return True
+        return False
+
+    @classmethod
+    def require_project_root(
+        cls,
+        project_root: Optional[str | Path] = None,
+        explicit: Optional[bool] = None,
+        allow_unmarked: bool = False,
+    ) -> Path:
+        """Resolve a project root that is safe to *create a store in*.
+
+        ``explicit`` means the caller named this project itself (``--project``,
+        ``TACIT_PROJECT``, ``tacit init --dir``); an explicit choice is always
+        honoured. Otherwise two things are refused:
+
+        * a **container** directory — home, drive root, system or temp folder, or
+          any directory that already holds a registered project — because a store
+          there is shared by every workspace underneath it, and
+        * a **marker-less** directory — one with no ``.tacit``/``.git``/
+          ``pyproject.toml``/``package.json`` — because a store invented there
+          becomes an ancestor marker for whatever is later created below it.
+          ``allow_unmarked`` exists for the one caller that legitimately creates
+          a project: ``tacit init``.
+        """
+        root = cls.find_project_root(project_root)
+        if explicit is None:
+            explicit = bool(project_root) or bool(os.environ.get("TACIT_PROJECT", "").strip())
+        if explicit:
+            return root
+        if cls.is_container_dir(root):
+            raise ProjectRootError(
+                f"'{root}' is not a project: it is a container directory "
+                "(home, drive root, system or temp folder).\n"
+                "Tacit will not create a memory store there, because every project "
+                "below it would then share one store and mix memories.\n"
+                "Fix: run `tacit init` inside the repository you are working in, or "
+                "point Tacit at it explicitly with `--project <path>` / the "
+                "TACIT_PROJECT environment variable."
+            )
+        if not allow_unmarked and not cls.has_project_marker(root):
+            raise ProjectRootError(
+                f"'{root}' is not a project: no .tacit, .git, pyproject.toml or "
+                "package.json was found here.\n"
+                "Tacit will not create a memory store in an unidentified directory, "
+                "because it would then be discovered by everything created below it.\n"
+                "Fix: cd into the repository, run `tacit init` here if this directory "
+                "really is the project, or name one with `--project <path>` / the "
+                "TACIT_PROJECT environment variable."
+            )
+        return root
+
+    @classmethod
+    def is_usable_project(cls, path: Optional[str | Path]) -> bool:
+        """True when ``path`` exists and may host a store (registry hygiene)."""
+        if not path:
+            return False
+        try:
+            candidate = Path(path).expanduser()
+        except (OSError, TypeError):
+            return False
+        if not candidate.exists():
+            return False
+        if cls.is_container_dir(candidate):
+            return False
+        return cls.has_project_marker(candidate)
+
     @classmethod
     def get_memory_dir(cls, project_root: Optional[str | Path] = None) -> Path:
         """Get the memory directory (.tacit) for a specific project.
@@ -200,6 +356,36 @@ class Config:
         return cls.get_memory_dir(project_root) / "memory.db"
 
     @classmethod
+    def project_root_for_db(cls, db_path: str | Path) -> Path:
+        """Infer the project root that owns a database file.
+
+        Needed by readers that only receive a ``MemoryStorage`` (the briefing and
+        search engines) and must still know the project's name to recognise
+        project-wide scopes. Handles both the default ``<root>/.tacit`` layout and
+        a store relocated by ``tacit move``, whose marker directory keeps a
+        ``location`` pointer back to it.
+        """
+        try:
+            store_dir = Path(db_path).resolve().parent
+        except (OSError, RuntimeError):
+            return Path.cwd()
+        if store_dir.name == cls.DEFAULT_MEMORY_DIR_NAME:
+            return store_dir.parent
+        # Relocated store: find the marker directory pointing at it.
+        probe = store_dir.parent
+        while True:
+            marker = probe / cls.DEFAULT_MEMORY_DIR_NAME
+            pointer = marker / cls.MEMORY_LOCATION_FILE
+            if pointer.exists():
+                relocated = cls.read_memory_location(probe)
+                if relocated is not None and relocated == store_dir:
+                    return probe
+            if probe.parent == probe:
+                break
+            probe = probe.parent
+        return store_dir
+
+    @classmethod
     def get_export_dir(cls, project_root: Optional[str | Path] = None) -> Path:
         """Get the memory-export directory for a specific project."""
         root = cls.find_project_root(project_root)
@@ -209,10 +395,20 @@ class Config:
         return root / cls.DEFAULT_EXPORT_DIR_NAME
 
     @classmethod
-    def ensure_directories(cls, project_root: Optional[str | Path] = None) -> Path:
-        """Create necessary data directories for a given project and register in global index."""
-        memory_dir = cls.get_memory_dir(project_root)
-        export_dir = cls.get_export_dir(project_root)
+    def ensure_directories(
+        cls,
+        project_root: Optional[str | Path] = None,
+        allow_unmarked: bool = False,
+    ) -> Path:
+        """Create necessary data directories for a given project and register in global index.
+
+        Refuses to invent a store in a container directory (home, drive root,
+        system or temp folder) or in an unidentified directory unless the caller
+        named that project explicitly: see :class:`ProjectRootError`.
+        """
+        root = cls.require_project_root(project_root, allow_unmarked=allow_unmarked)
+        memory_dir = cls.get_memory_dir(root)
+        export_dir = cls.get_export_dir(root)
 
         memory_dir.mkdir(parents=True, exist_ok=True)
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -220,9 +416,6 @@ class Config:
         for subdir in cls.MEMORY_TYPES:
             (memory_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-        # The store may live in a subfolder, so the project root cannot be
-        # inferred from the memory dir's parent any more.
-        root = cls.find_project_root(project_root)
         cls.register_project(root)
         return root
 
@@ -238,24 +431,41 @@ class Config:
 
     @classmethod
     def register_project(cls, project_path: Path) -> None:
-        """Register a project root in the global registry for easy multi-project tracking."""
+        """Register a project root in the global registry for easy multi-project tracking.
+
+        Container directories are never registered: entries like the home
+        directory or ``System32`` are pure noise that also make
+        ``--project <name>`` lookups resolve to a shared store.
+        """
         try:
+            resolved = Path(project_path).resolve()
+            if not resolved.exists() or cls.is_container_dir(resolved):
+                return
             cls.REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
             projects = cls._load_projects_registry()
 
-            proj_str = str(project_path.resolve())
-            projects[project_path.name] = proj_str
+            projects[resolved.name] = str(resolved)
             cls.REGISTRY_FILE.write_text(json.dumps(projects, indent=2), encoding="utf-8")
         except Exception:
             pass
 
     @classmethod
     def list_registered_projects(cls) -> Dict[str, str]:
-        """Return all registered projects {name: path}."""
+        """Return all registered projects {name: path}, minus unusable entries.
+
+        Registrations that point at a container directory, a missing path or a
+        directory with no project marker are filtered out so stale junk cannot
+        be resolved back into a store.
+        """
         try:
-            return cls._load_projects_registry()
+            raw = cls._load_projects_registry()
         except Exception:
             return {}
+        return {
+            name: path
+            for name, path in raw.items()
+            if cls.is_usable_project(path)
+        }
 
     # Backward compatibility properties
     @property

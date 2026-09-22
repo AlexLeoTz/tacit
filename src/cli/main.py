@@ -25,7 +25,7 @@ from ..export.markdown_exporter import MarkdownExporter
 from ..export.preview_server import MarkdownPreviewServer
 from ..mcp.server import MemoryMCPServer
 from ..utils import updater
-from ..utils.config import Config
+from ..utils.config import Config, ProjectRootError
 
 app = typer.Typer(
     name="tacit",
@@ -164,6 +164,30 @@ def main_callback(
             pass
 
 
+def ensure_project_dirs(
+    root: Optional[str | Path] = None,
+    allow_unmarked: bool = False,
+) -> Path:
+    """Create the store for ``root``, reporting an unusable directory clearly.
+
+    Every CLI path that can create a store goes through here so a refused root
+    prints one actionable panel instead of a traceback. ``allow_unmarked`` is for
+    ``tacit init``, the one command whose whole purpose is to turn a directory
+    into a project.
+    """
+    try:
+        return Config.ensure_directories(root, allow_unmarked=allow_unmarked)
+    except ProjectRootError as exc:
+        console.print(
+            Panel.fit(
+                f"[bold red]No project to store memories in[/bold red]\n\n{_esc(str(exc))}",
+                border_style="red",
+                padding=(0, 2),
+            )
+        )
+        raise typer.Exit(code=1)
+
+
 def get_storage(project: Optional[str] = None) -> MemoryStorage:
     """Helper to initialize storage for target or current project root."""
     if project:
@@ -173,7 +197,7 @@ def get_storage(project: Optional[str] = None) -> MemoryStorage:
     else:
         root = Config.find_project_root()
 
-    Config.ensure_directories(root)
+    ensure_project_dirs(root if project else None)
     return MemoryStorage(Config.get_db_path(root))
 
 
@@ -185,10 +209,21 @@ def init(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force overwrite existing rule files"
     ),
+    structure: Optional[bool] = typer.Option(
+        None,
+        "--structure/--no-structure",
+        help="Keep a project structure snapshot (names and nesting only, never source "
+        "code) so future sessions can learn the layout in one call.",
+    ),
 ):
     """Initialize project memory database and directories for the current (or specified) project."""
+    from ..core import project_tree
+
     target_root = Config.find_project_root(directory)
-    Config.ensure_directories(target_root)
+    # `--dir` names the project explicitly, and `init` is the one command allowed
+    # to turn an unidentified directory into a project; a bare `tacit init` must
+    # still refuse a container directory, which is how a store ended up in home.
+    ensure_project_dirs(directory if directory else None, allow_unmarked=True)
     db_path = Config.get_db_path(target_root)
     storage = MemoryStorage(db_path)
     count = storage.get_count()
@@ -250,6 +285,44 @@ def init(
             border_style="green",
         )
     )
+
+    # Project structure snapshot: opt-in, asked once, stored in the .tacit store
+    # so `tacit move` carries it along. Structure and file names only.
+    store_dir = Config.get_memory_dir(target_root)
+    keep_structure = structure
+    if keep_structure is None:
+        keep_structure = True
+        try:
+            keep_structure = typer.confirm(
+                "\nKeep a project structure snapshot in .tacit so future agent sessions "
+                "learn the layout without exploring it file by file? (file names only, "
+                "never source code)",
+                default=True,
+            )
+        except Exception:
+            keep_structure = True
+
+    project_tree.update_tree_settings(store_dir, enabled=bool(keep_structure))
+    if keep_structure:
+        try:
+            snapshot = project_tree.refresh_snapshot(target_root, store_dir)
+            repos = snapshot.get("repos") or []
+            repo_note = (
+                f", {len(repos)} git repositories" if repos and repos != ["."] else ""
+            )
+            console.print(
+                f"[green]Project structure captured:[/green] "
+                f"{snapshot.get('entry_count', 0)} entries{repo_note}\n"
+                f"[dim]Stored at[/dim] {project_tree.snapshot_path(store_dir)}\n"
+                "[dim]Refresh it any time with[/dim] [cyan]tacit structure --refresh[/cyan]"
+            )
+        except Exception as exc:  # a failed walk must never break init
+            console.print(f"[yellow]Could not capture the project structure:[/yellow] {exc}")
+    else:
+        console.print(
+            "[dim]Project structure snapshot disabled. Enable later with[/dim] "
+            "[cyan]tacit structure --enable[/cyan]"
+        )
 
 
 @app.command()
@@ -362,7 +435,7 @@ def move(
         Config.write_memory_location(root, target)
 
     # Safe now: the pointer (or its absence) routes this to the right place.
-    Config.ensure_directories(root)
+    ensure_project_dirs(root)
 
     console.print(
         Panel.fit(
@@ -1225,20 +1298,134 @@ def briefing_cmd(
         "-t",
         help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
     ),
+    scope: str = typer.Option(
+        "",
+        "--scope",
+        help="Comma-separated scope paths. Filters the briefing: only memories scoped to "
+        "these paths (plus project-wide knowledge) are shown. Omit for the whole workspace.",
+    ),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Target project name or directory"
     ),
 ):
     """Generate intelligent relevance-ranked project briefing for agent bootstrapping."""
     from ..core.bootstrap import BootstrapEngine
+    from ..utils.scope import resolve_scope_hints
 
     storage = get_storage(project)
+    scope_list = resolve_scope_hints(
+        [s for s in scope.split(",") if s.strip()],
+        project_root=Config.find_project_root(project),
+    )
+    if scope_list:
+        console.print(f"[dim]Scope filter:[/dim] {', '.join(scope_list)}")
     res = BootstrapEngine.generate_briefing(
-        storage=storage, budget=budget, timeframe=timeframe
+        storage=storage, budget=budget, timeframe=timeframe, scope_hint=scope_list or None
     )
     # The briefing is pre-rendered plain text: markup=False keeps bracketed titles
     # like "[WinError 32] ..." from being parsed as Rich style tags.
     console.print(res.get("formatted", ""), markup=False)
+
+
+@app.command()
+def structure(
+    refresh: bool = typer.Option(
+        False, "--refresh", "-r", help="Re-walk the filesystem and update the snapshot"
+    ),
+    path: str = typer.Option(
+        "", "--path", "-P", help="Only render this project-relative subdirectory"
+    ),
+    depth: Optional[int] = typer.Option(
+        None, "--depth", "-D", help="Maximum directory depth to capture on refresh"
+    ),
+    enable: bool = typer.Option(False, "--enable", help="Enable project-tree capture"),
+    disable: bool = typer.Option(False, "--disable", help="Disable project-tree capture"),
+    repos: bool = typer.Option(
+        False, "--repos", help="Only list the git repositories discovered under the root"
+    ),
+    set_repos: str = typer.Option(
+        "",
+        "--set-repos",
+        help="Pin the tracked repositories as a comma-separated list of project-relative "
+        "paths (empty string means: discover them from .git automatically)",
+    ),
+    no_gists: bool = typer.Option(
+        False, "--no-gists", help="Render without the stored per-file gists"
+    ),
+    lines: int = typer.Option(400, "--lines", "-n", help="Maximum rendered lines"),
+    as_json: bool = typer.Option(False, "--json", help="Print the raw snapshot as JSON"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+):
+    """Show or refresh the captured project structure (names and nesting, never source code)."""
+    from ..core import project_tree
+
+    root = Config.find_project_root(project).resolve()
+    ensure_project_dirs(project if project else None)
+    store_dir = Config.get_memory_dir(root)
+    settings = project_tree.tree_settings(store_dir)
+
+    if enable or disable:
+        settings = project_tree.update_tree_settings(store_dir, enabled=enable)
+        console.print(
+            f"Project-tree capture [bold]{'enabled' if enable else 'disabled'}[/bold] "
+            f"for {root}"
+        )
+
+    if set_repos != "":
+        pinned = [entry.strip().replace("\\", "/") for entry in set_repos.split(",") if entry.strip()]
+        settings = project_tree.update_tree_settings(store_dir, repos=pinned)
+        console.print(
+            f"[green]Tracking {len(pinned)} repo(s):[/green] {', '.join(pinned)}"
+            if pinned
+            else "[green]Repository list cleared; .git discovery is used again.[/green]"
+        )
+
+    if depth is not None:
+        settings = project_tree.update_tree_settings(store_dir, max_depth=max(1, int(depth)))
+
+    if repos or set_repos != "" or depth is not None or enable:
+        discovered = project_tree.discover_repos(root, extra_ignores=settings.get("ignore") or [])
+        if repos:
+            tracked = settings.get("repos") or discovered
+            console.print("[bold]Git repositories under[/bold] " + str(root))
+            console.print(
+                "\n".join(f"  - {entry}" for entry in tracked) or "  (none found)",
+                markup=False,
+            )
+            if repos:
+                return
+
+    if refresh or (settings.get("enabled") and not project_tree.load_snapshot(store_dir)):
+        # Refreshing is a request for the map to exist, so it re-enables a
+        # workspace whose capture was turned off.
+        if refresh and not settings.get("enabled"):
+            settings = project_tree.update_tree_settings(store_dir, enabled=True)
+        snapshot = project_tree.refresh_snapshot(root, store_dir)
+        console.print(
+            f"[green]Snapshot updated:[/green] {snapshot.get('entry_count', 0)} entries"
+            + (" [yellow](truncated)[/yellow]" if snapshot.get("truncated") else "")
+        )
+
+    if as_json:
+        snapshot = project_tree.load_snapshot(store_dir)
+        if snapshot is None:
+            console.print("[yellow]No snapshot yet. Run with --refresh.[/yellow]")
+            raise typer.Exit(code=1)
+        console.print(json.dumps(snapshot, indent=2), markup=False)
+        return
+
+    console.print(
+        project_tree.render_stored(
+            root,
+            store_dir,
+            path_prefix=path,
+            include_gists=not no_gists,
+            max_lines=max(20, int(lines)),
+        ),
+        markup=False,
+    )
 
 
 @app.command(name="context")
@@ -1252,12 +1439,17 @@ def context_cmd(
         "-t",
         help="Only brief on memories from this window: all, week, 30d, 6h, year, or an ISO date",
     ),
+    scope: str = typer.Option(
+        "",
+        "--scope",
+        help="Comma-separated scope paths; filters the briefing to those subsystems.",
+    ),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Target project name or directory"
     ),
 ):
     """Alias for 'briefing' — generate relevance-ranked project briefing for agent bootstrapping."""
-    briefing_cmd(budget=budget, timeframe=timeframe, project=project)
+    briefing_cmd(budget=budget, timeframe=timeframe, scope=scope, project=project)
 
 
 @app.command()
@@ -1367,12 +1559,31 @@ def mcp(
     # Pin the workspace once, at startup. Resolving it from the process CWD on
     # every call lets a client that changes directory answer from the wrong
     # project's database partway through a session.
-    pinned_root = Config.find_project_root(project)
-    Config.ensure_directories(pinned_root)
-    # Never print to stdout here: stdio transport carries JSON-RPC on stdout and
-    # any stray write corrupts the protocol stream.
-    Console(stderr=True).print(f"[dim]Tacit MCP serving workspace:[/dim] {pinned_root.resolve()}")
-    server = MemoryMCPServer(project_root=pinned_root)
+    #
+    # A server launched from a container directory (a client whose CWD is the
+    # home folder, say) must NOT invent a store there: that one store would then
+    # answer for every workspace the client serves. It starts anyway, but every
+    # tool call that does not name a `project` reports the problem instead.
+    stderr_console = Console(stderr=True)
+    unresolved_reason: Optional[str] = None
+    try:
+        pinned_root = Config.require_project_root(project)
+    except ProjectRootError as exc:
+        pinned_root = Config.find_project_root(project)
+        unresolved_reason = str(exc)
+        # Never print to stdout here: stdio transport carries JSON-RPC on stdout.
+        stderr_console.print(
+            f"[yellow]Tacit MCP started without a workspace:[/yellow] {pinned_root}\n"
+            f"{exc}\n"
+            "[dim]Tools keep working when they are called with an explicit "
+            "`project`.[/dim]"
+        )
+    else:
+        Config.ensure_directories(pinned_root)
+        stderr_console.print(
+            f"[dim]Tacit MCP serving workspace:[/dim] {pinned_root.resolve()}"
+        )
+    server = MemoryMCPServer(project_root=pinned_root, unresolved_reason=unresolved_reason)
     server.run(transport=transport)
 
 
