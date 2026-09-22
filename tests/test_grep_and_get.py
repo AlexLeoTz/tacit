@@ -37,7 +37,21 @@ def storage(tmp_dir):
 
 
 @pytest.fixture(autouse=True)
-def corpus(storage):
+def fast_writes(monkeypatch):
+    """The corpus is rebuilt per test, so keep each write cheap.
+
+    Markdown dual-write and the embedding attempt dominate `add_memory`; neither
+    is what these read-path tests are exercising.
+    """
+    from src.search.embeddings import EmbeddingService
+    from src.utils.config import Config
+
+    monkeypatch.setattr(Config, "DUAL_WRITE", False, raising=False)
+    monkeypatch.setattr(EmbeddingService, "available", property(lambda self: False))
+
+
+@pytest.fixture(autouse=True)
+def corpus(storage, fast_writes):
     """Three memories per test, with genuinely distinct UUID prefixes.
 
     Emptied per test rather than rebuilt: constructing a ``MemoryStorage`` runs
@@ -197,6 +211,41 @@ def test_cli_get_reports_a_missing_id(tmp_dir):
     assert "No memory node with the exact UUID" in " ".join(result.stdout.split())
 
 
+def test_cli_get_suggests_the_right_id_when_the_leading_character_is_dropped(tmp_dir, corpus):
+    """The exact reported slip: 548bfe4f… was pasted as 48bfe4f…."""
+    target = corpus["title_hit"]
+    truncated = target.id[1:]
+
+    result = CliRunner().invoke(app, ["get", truncated, "--project", str(tmp_dir)])
+
+    assert result.exit_code == 1, "get must still refuse an inexact id"
+    flat = " ".join(result.stdout.split())
+    assert "Did you mean" in flat
+    assert target.id in flat, "the near-miss candidate must be shown in full"
+
+
+def test_cli_get_suggests_for_a_missing_trailing_character(tmp_dir, corpus):
+    target = corpus["summary_hit"]
+
+    result = CliRunner().invoke(app, ["get", target.id[:-1], "--project", str(tmp_dir)])
+
+    assert result.exit_code == 1
+    assert target.id in " ".join(result.stdout.split())
+
+
+def test_cli_get_stays_silent_when_nothing_is_close(tmp_dir):
+    result = CliRunner().invoke(
+        app, ["get", "99999999-9999-4999-8999-999999999999", "--project", str(tmp_dir)]
+    )
+
+    assert result.exit_code == 1
+    assert "Did you mean" not in result.stdout
+
+
+def test_find_id_candidates_ignores_tiny_fragments(storage):
+    assert storage.find_id_candidates("ab") == []
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -306,6 +355,25 @@ def test_memory_get_requires_the_full_uuid(storage, tmp_dir, corpus):
     assert res["found"] is False
     assert "exact UUID" in res["message"]
     assert "memory_grep" in res["message"], "point at how to find the real id"
+    assert target.id in res["message"], "the near-miss candidate must be offered"
+    assert "Did you mean" in res["message"]
+
+
+def test_ids_are_listed_one_per_line_even_with_newlines_in_a_title(tmp_dir, storage):
+    """Auto-generated titles from older versions contain the body's newlines."""
+    node = MemoryNode(
+        id=str(uuid.uuid4()),
+        title="Architecture: ### 1. Context\nLarge multi-gigabyte files",
+        summary="s", content="c",
+    )
+    storage.add_memory(node)
+
+    result = CliRunner().invoke(app, ["grep", "Architecture", "--project", str(tmp_dir)])
+
+    assert result.exit_code == 0
+    line = next(l for l in result.stdout.splitlines() if node.id in l)
+    assert "\n" not in line
+    assert "###" in line or "Context" in line, "the label is flattened, not dropped"
 
 
 def test_memory_get_returns_the_full_content(storage, tmp_dir, corpus):

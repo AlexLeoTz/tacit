@@ -13,6 +13,9 @@ class Config:
     """Centralized configuration and multi-project resolver for Tacit."""
 
     DEFAULT_MEMORY_DIR_NAME = ".tacit"
+
+    #: Pointer inside the marker directory naming the real store after `tacit move`.
+    MEMORY_LOCATION_FILE = "location"
     DEFAULT_EXPORT_DIR_NAME = "memory-export"
     REGISTRY_FILE: Path = Path.home() / ".gemini" / "config" / "tacit_projects.json"
 
@@ -130,12 +133,66 @@ class Config:
 
     @classmethod
     def get_memory_dir(cls, project_root: Optional[str | Path] = None) -> Path:
-        """Get the memory directory (.tacit) for a specific project."""
+        """Get the memory directory (.tacit) for a specific project.
+
+        The store can be relocated with ``tacit move``; a pointer file left in
+        ``<root>/.tacit/location`` records where it went, so the marker directory
+        stays in place and project discovery is unaffected.
+        """
         root = cls.find_project_root(project_root)
         env_dir = os.getenv("MEMORY_DIR")
         if env_dir and not project_root:
             return Path(env_dir).resolve()
+        relocated = cls.read_memory_location(root)
+        if relocated is not None:
+            return relocated
         return root / cls.DEFAULT_MEMORY_DIR_NAME
+
+    @classmethod
+    def read_memory_location(cls, project_root: str | Path) -> Optional[Path]:
+        """Resolve the relocation pointer, or ``None`` when the store is default."""
+        marker = Path(project_root) / cls.DEFAULT_MEMORY_DIR_NAME
+        pointer = marker / cls.MEMORY_LOCATION_FILE
+        try:
+            raw = pointer.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not raw or raw.startswith("#"):
+            return None
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            target = Path(project_root) / target
+        try:
+            return target.resolve()
+        except OSError:
+            return target
+
+    @classmethod
+    def write_memory_location(cls, project_root: str | Path, memory_dir: str | Path) -> Path:
+        """Record where the store now lives, relative to the project root when possible."""
+        root = Path(project_root)
+        marker = root / cls.DEFAULT_MEMORY_DIR_NAME
+        marker.mkdir(parents=True, exist_ok=True)
+        pointer = marker / cls.MEMORY_LOCATION_FILE
+        target = Path(memory_dir)
+        try:
+            relative = target.resolve().relative_to(root.resolve())
+            text = str(relative).replace("\\", "/")
+        except (OSError, ValueError):
+            text = str(target.resolve())
+        pointer.write_text(text + "\n", encoding="utf-8")
+        return pointer
+
+    @classmethod
+    def clear_memory_location(cls, project_root: str | Path) -> None:
+        """Drop the pointer, returning the project to the default location."""
+        pointer = (
+            Path(project_root) / cls.DEFAULT_MEMORY_DIR_NAME / cls.MEMORY_LOCATION_FILE
+        )
+        try:
+            pointer.unlink()
+        except OSError:
+            pass
 
     @classmethod
     def get_db_path(cls, project_root: Optional[str | Path] = None) -> Path:
@@ -163,7 +220,9 @@ class Config:
         for subdir in cls.MEMORY_TYPES:
             (memory_dir / subdir).mkdir(parents=True, exist_ok=True)
 
-        root = memory_dir.parent
+        # The store may live in a subfolder, so the project root cannot be
+        # inferred from the memory dir's parent any more.
+        root = cls.find_project_root(project_root)
         cls.register_project(root)
         return root
 

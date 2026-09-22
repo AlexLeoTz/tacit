@@ -127,17 +127,21 @@ def resolve_cache_dir(project_root: Optional[Path] = None) -> Path:
             return candidate
         return candidate
 
+    from ..utils.config import Config
+
     if project_root is None:
         try:
-            from ..utils.config import Config
-
             project_root = Config.find_project_root()
         except Exception:
             project_root = None
 
     candidates = [user_cache_dir()]
     if project_root is not None:
-        candidates.append(Path(project_root) / ".tacit" / "models")
+        try:
+            # Follows a relocated store, so `tacit move` carries the model too.
+            candidates.append(Config.get_memory_dir(project_root) / "models")
+        except Exception:
+            candidates.append(Path(project_root) / ".tacit" / "models")
 
     for candidate in candidates:
         if _is_writable_dir(candidate):

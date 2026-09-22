@@ -76,9 +76,12 @@ def _print_ids(nodes: Iterable, title: str = "Full IDs") -> None:
         return
     console.print(f"\n[dim]{title} (pass to `tacit get`):[/dim]")
     for node in nodes:
+        # Older memories have auto-generated titles containing the embedded
+        # newlines of their body, which would break the one-id-per-line layout.
+        label = " ".join(str(node.title or node.summary).split())
         line = Text()
         line.append(f"  {node.id}  ", style="cyan")
-        line.append(str(node.title or node.summary), style="dim")
+        line.append(label, style="dim")
         console.print(line, no_wrap=True, overflow="ellipsis")
 
 
@@ -247,6 +250,136 @@ def init(
             border_style="green",
         )
     )
+
+
+@app.command()
+def move(
+    destination: str = typer.Argument(
+        ...,
+        help="Folder inside the project to move .tacit into; use '.' to move it back to the project root",
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+):
+    """Relocate this project's .tacit store into a subfolder, leaving a pointer behind.
+
+    The store is moved, not copied. A one-line pointer stays at
+    ``<root>/.tacit/location`` so nothing else has to change: discovery, the
+    database, the exported Markdown and the model cache all follow it.
+    """
+    import shutil
+
+    root = Config.find_project_root(project).resolve()
+    current = Config.get_memory_dir(root).resolve()
+
+    # Resolve the destination relative to the project root, and refuse to leave it.
+    if Path(destination).is_absolute():
+        destination_dir = Path(destination).resolve()
+    else:
+        destination_dir = (root / destination).resolve()
+
+    try:
+        destination_dir.relative_to(root)
+    except ValueError:
+        console.print(
+            f"[red]Destination must be inside the project root.[/red]\n"
+            f"[dim]Project root:[/dim] {root}"
+        )
+        raise typer.Exit(code=1)
+
+    at_root = destination_dir == root
+    target = (
+        root / Config.DEFAULT_MEMORY_DIR_NAME
+        if at_root
+        else destination_dir / Config.DEFAULT_MEMORY_DIR_NAME
+    )
+
+    if target == current:
+        console.print(f"[yellow]The store is already at[/yellow] {current}")
+        return
+
+    if current in destination_dir.parents or destination_dir == current:
+        console.print(
+            "[red]Cannot move the store inside itself.[/red]\n"
+            f"[dim]Store:[/dim]       {current}\n"
+            f"[dim]Destination:[/dim] {destination_dir}"
+        )
+        raise typer.Exit(code=1)
+
+    # Moving back to the root lands on the marker directory, which may still hold
+    # the pointer. Clear it if that is all that is there, so the move does not
+    # nest the store inside its own marker.
+    if not current.exists():
+        console.print(
+            f"[red]No Tacit store found at[/red] {current}\n"
+            "[dim]Run `tacit init` first.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
+    # Moving back to the root lands on the marker directory, which may still hold
+    # the pointer. Clear it if that is all that is there, so the move does not
+    # nest the store inside its own marker.
+    if target.exists():
+        pointer = target / Config.MEMORY_LOCATION_FILE
+        remaining = [p for p in target.iterdir() if p != pointer] if target.is_dir() else []
+        if at_root and target.is_dir() and not remaining:
+            pointer.unlink(missing_ok=True)
+            target.rmdir()
+        else:
+            console.print(
+                f"[red]A .tacit store already exists at[/red] {target}\n"
+                "[dim]Move or remove it first; nothing has been changed.[/dim]"
+            )
+            raise typer.Exit(code=1)
+
+    # Only the parent. `shutil.move` onto an existing directory would nest the
+    # store inside it, so the target itself must never be created here -- and
+    # `ensure_directories` must not run until the pointer is in place, since it
+    # would otherwise recreate the marker path we are moving onto.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        console.print(
+            f"[red]A .tacit store appeared at[/red] {target}\n"
+            "[dim]Nothing has been changed.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        shutil.move(str(current), str(target))
+    except OSError as exc:
+        console.print(
+            f"[red]Could not move the store: {exc}[/red]\n"
+            "[dim]A running `tacit serve` or MCP daemon may hold memory.db open. "
+            "Close it and retry.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
+    if at_root:
+        # Back to the default: no pointer needed, discovery finds it directly.
+        Config.clear_memory_location(root)
+    else:
+        Config.write_memory_location(root, target)
+
+    # Safe now: the pointer (or its absence) routes this to the right place.
+    Config.ensure_directories(root)
+
+    console.print(
+        Panel.fit(
+            "[bold green]Tacit store moved[/bold green]\n"
+            f"[dim]From:[/dim] {current}\n"
+            f"[dim]To:[/dim]   {target}\n\n"
+            f"A pointer stays at [cyan]{root / Config.DEFAULT_MEMORY_DIR_NAME / Config.MEMORY_LOCATION_FILE}[/cyan]\n"
+            "so every command keeps working. Point it back with "
+            f"[bold]tacit move .[/bold]",
+            border_style="green",
+        )
+    )
+    if (root / Config.DEFAULT_EXPORT_DIR_NAME).exists():
+        console.print(
+            f"[dim]Note: `{Config.DEFAULT_EXPORT_DIR_NAME}` stays at the project root; "
+            "`tacit export` is unaffected.[/dim]"
+        )
 
 
 @app.command()
@@ -548,12 +681,18 @@ def get(
 
     if not node:
         # Deliberately no prefix matching: `get` retrieves one exact node, and a
-        # partial id could resolve to a different memory than intended.
+        # partial id could resolve to a different memory than intended. But a
+        # near-miss (a dropped leading character is the usual slip) should not
+        # be a dead end, so offer the candidates instead of resolving them.
         console.print(
             f"[red]No memory node with the exact UUID '{node_id}'.[/red]\n"
             "[dim]`tacit get` requires the full UUID. Find it with "
             f'[bold cyan]tacit grep "KEYWORD"[/bold cyan] or [bold cyan]tacit search "QUERY"[/bold cyan].[/dim]'
         )
+        suggestions = storage.find_id_candidates(node_id)
+        if suggestions:
+            console.print("\n[yellow]Did you mean:[/yellow]")
+            _print_ids(suggestions, title="Closest IDs")
         raise typer.Exit(code=1)
 
     exporter = MarkdownExporter(storage)

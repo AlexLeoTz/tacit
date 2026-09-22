@@ -342,6 +342,20 @@ tacit get a1b2c3d4-e5f6-7890-abcd-ef1234567890 --raw
 > `tacit search "QUERY"`, both of which print it in full. Content is shown
 > verbatim, brackets and all.
 
+### Relocate the Memory Store
+```bash
+# Move .tacit into a subfolder, leaving a pointer so every command keeps working
+tacit move agent-memory
+#   <root>/.tacit  ->  <root>/agent-memory/.tacit
+
+# Move it back to the project root
+tacit move .
+```
+
+> The move is not a copy: the database, exported Markdown and offline model cache
+> travel together. A one-line pointer at `<root>/.tacit/location` records the new
+> path, so discovery, the CLI, the MCP tools and the dashboard are unaffected.
+
 ### Grep Titles and Summaries
 ```bash
 # Literal, case-insensitive substring match over titles and summaries only

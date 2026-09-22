@@ -27,6 +27,48 @@ def test_memory_node_creation_and_hashes():
     assert node.verify() is True
 
 
+def test_auto_title_uses_the_first_meaningful_line():
+    """Titles are embedded into the vector index, so a raw body slice is a poor key.
+
+    The old behaviour took ``content[:50]`` verbatim, carrying ``###`` markers
+    and embedded newlines into the title and breaking one-line display.
+    """
+    node = MemoryNode(
+        content="### 1. Context & Problem Statement\nLarge multi-gigabyte video files...",
+        type="architecture",
+    )
+
+    assert node.title == "Architecture: Context & Problem Statement"
+    assert "\n" not in node.title
+    assert "#" not in node.title
+
+
+def test_auto_title_skips_blank_leading_lines_and_list_markers():
+    node = MemoryNode(content="\n\n  \n- Fixed the pool size\nmore text", type="error")
+
+    assert node.title == "Error: Fixed the pool size"
+
+
+def test_auto_title_truncates_a_long_headline():
+    node = MemoryNode(content="X" * 200, type="decision")
+
+    assert node.title.startswith("Decision: ")
+    assert node.title.endswith("...")
+    assert len(node.title) <= len("Decision: ") + 60
+
+
+def test_auto_title_falls_back_when_there_is_nothing_usable():
+    assert MemoryNode(content="", type="context").title == "Context: Memory Node"
+    assert MemoryNode(content="###\n", type="context").title == "Context: Memory Node"
+
+
+def test_auto_summary_is_single_line_prose():
+    node = MemoryNode(content="### Heading\n\nBody line one.\nBody line two.")
+
+    assert "\n" not in node.summary
+    assert "Heading Body line one." in node.summary
+
+
 def test_memory_node_serialization():
     """Verify dictionary serialization and deserialization roundtrip."""
     original = MemoryNode(

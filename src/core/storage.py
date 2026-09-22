@@ -303,6 +303,33 @@ class MemoryStorage:
             finally:
                 conn.close()
 
+    def find_id_candidates(self, fragment: str, limit: int = 5) -> List[MemoryNode]:
+        """Memories whose id starts or ends with ``fragment``.
+
+        Used only to suggest, never to resolve: `get` stays exact, but a
+        transposed or truncated UUID should not be a dead end. Dropping the
+        leading character is the common slip, which is why suffixes are checked
+        as well as prefixes.
+        """
+        cleaned = (fragment or "").strip().strip('"').strip("'")
+        if len(cleaned) < 4:
+            return []
+        escaped = _escape_like(cleaned)
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM memories "
+                    "WHERE id LIKE ? ESCAPE '!' OR id LIKE ? ESCAPE '!' "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (f"{escaped}%", f"%{escaped}", max(1, limit)),
+                ).fetchall()
+                return [MemoryNode.from_dict(dict(row)) for row in rows]
+            except Exception:
+                return []
+            finally:
+                conn.close()
+
     def grep_memories(
         self,
         keyword: str,

@@ -4,9 +4,34 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import json
+import re
 import uuid
 
 from ..utils.hashing import calculate_content_hash, calculate_merkle_root
+
+_HEADING_MARKERS = re.compile(r"^\s{0,3}#{1,6}\s*")
+_LIST_MARKERS = re.compile(r"^\s{0,3}(?:[-*+]|\d+[.)])\s+")
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _flatten(text: str) -> str:
+    """Collapse a multi-line body into one line of plain prose."""
+    return _WHITESPACE.sub(" ", text or "").strip()
+
+
+def _headline(text: str) -> str:
+    """First meaningful line, with Markdown heading and list markers removed.
+
+    Auto-generated titles used to be a raw ``content[:50]`` slice, which carried
+    embedded newlines and ``###`` markers into the title. Titles are what the
+    vector index embeds, so a body fragment is a poor key.
+    """
+    for raw in (text or "").splitlines():
+        line = _LIST_MARKERS.sub("", _HEADING_MARKERS.sub("", raw))
+        line = _flatten(line)
+        if line:
+            return line
+    return ""
 
 
 @dataclass(frozen=True)
@@ -52,21 +77,20 @@ class MemoryNode:
         """Populate default summaries/titles and calculate cryptographic hashes."""
         # Auto-populate summary if omitted
         if not self.summary:
+            flattened = _flatten(self.content)
             computed_summary = (
-                self.content[:100] + ("..." if len(self.content) > 100 else "")
-                if self.content
+                flattened[:100] + ("..." if len(flattened) > 100 else "")
+                if flattened
                 else "Untitled Memory"
             )
             object.__setattr__(self, "summary", computed_summary)
 
         # Auto-populate title if omitted
         if not self.title:
-            content_snippet = (
-                self.content[:50] + ("..." if len(self.content) > 50 else "")
-                if self.content
-                else "Memory Node"
-            )
-            computed_title = f"{self.type.capitalize()}: {content_snippet}"
+            headline = _headline(self.content) or "Memory Node"
+            if len(headline) > 60:
+                headline = headline[:57].rstrip() + "..."
+            computed_title = f"{self.type.capitalize()}: {headline}"
             object.__setattr__(self, "title", computed_title)
 
         # Calculate content hash if empty

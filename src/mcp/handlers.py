@@ -403,14 +403,20 @@ class MemoryMCPHandlers:
         storage = self._resolve_storage(project)
         node = storage.get_memory(node_id)
         if not node:
-            return {
-                "found": False,
-                "message": (
-                    f"No memory node with the exact UUID '{node_id}'. "
-                    "memory_get requires the complete UUID; use memory_grep or memory_search "
-                    "to locate the node first."
-                ),
-            }
+            message = (
+                f"No memory node with the exact UUID '{node_id}'. "
+                "memory_get requires the complete UUID; use memory_grep or memory_search "
+                "to locate the node first."
+            )
+            # A dropped leading character is the usual slip; name the candidates
+            # rather than resolving them, since get must stay exact.
+            candidates = storage.find_id_candidates(node_id)
+            if candidates:
+                listing = "\n".join(
+                    f"  {c.id} [{c.type}] {c.title or c.summary}" for c in candidates
+                )
+                message += f"\nDid you mean one of these?\n{listing}"
+            return {"found": False, "message": message}
 
         # Build lineage tree
         all_nodes = storage.get_all(limit=1000)
