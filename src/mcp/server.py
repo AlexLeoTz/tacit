@@ -271,6 +271,20 @@ def create_mcp_server(
         )
         return res.get("message") or res.get("formatted") or json.dumps(res, indent=2)
 
+    @mcp.tool(description=(
+        "Pin or unpin memories so they always appear at the end of memory_context "
+        "regardless of their score. Pinned memories represent important tacit knowledge "
+        "and critical invariants curated by developers that agents must always pay attention to."
+    ))
+    def memory_pin(
+        ids: List[str],
+        unpin: bool = False,
+        project: Optional[str] = None,
+    ) -> str:
+        """Pin or unpin memories so they always appear at the end of memory_context."""
+        res = handlers.handle_memory_pin(ids=ids, unpin=unpin, project=project)
+        return res.get("message") or res.get("formatted") or json.dumps(res, indent=2)
+
     @mcp.prompt("tacit-instructions")
     def tacit_instructions() -> str:
         """System instructions for AI agents on how to use Tacit."""
@@ -280,6 +294,10 @@ def create_mcp_server(
             "WHAT TACIT STORES VS WHAT NOT TO STORE:\n"
             "- ONLY store distilled tacit knowledge: non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.\n"
             "- NEVER store raw chat history/transcripts, terminal logs, or full source code files/snippets. Tacit is an institutional decision ledger, not a code or log sink.\n\n"
+            "PINNED TACIT KNOWLEDGE (PINNED BY DEV):\n"
+            "- Pay close attention to pinned memories in the 'Pinned by DEV' section at the end of memory_context.\n"
+            "- These memories are important tacit knowledge, invariants, or constraints pinned by developers and appear disregard of their score.\n"
+            "- You and developers can pin memories using `tacit pin <id ...>` or `memory_pin(ids=[...])`.\n\n"
             "RIGOROUS CONTENT DETAIL REQUIREMENT:\n"
             "- Never write shallow 1-3 line entries. `summary` is a 1-sentence abstract, but `content` MUST be a rich, self-contained Markdown explanation so any future reader or agent understands the full rationale without asking again:\n"
             "  * FOR DECISIONS / ARCHITECTURE: Include 1) Context & Problem Statement, 2) Alternatives Considered & Why Rejected, 3) Technical Rationale & Strategy, 4) Trade-offs & Operational Consequences, 5) Validation / Verification.\n"
@@ -291,7 +309,8 @@ def create_mcp_server(
             "- Use `memory_add_batch` to insert multiple related entries at once. Use `$prev` or `$0` in `parents` so the decision links to the error it resolves.\n\n"
             "MANDATORY AGENT WORKFLOW:\n"
             "1. SESSION BOOTSTRAP: At session start or when beginning a new task, call `memory_context()` "
-            "to receive an intelligent relevance-ranked briefing of active architectural patterns, critical commands, hacks, and solved errors.\n\n"
+            "to receive an intelligent relevance-ranked briefing of active architectural patterns, critical commands, hacks, and solved errors. "
+            "Pay close attention to pinned memories at the end of the briefing, as they represent important tacit knowledge pinned by DEV.\n\n"
             "1b. ORIENT IN THE CODEBASE: Call `project_structure()` once to get the workspace map "
             "(directories and file names, with any stored per-file gists) instead of exploring the tree file by file. "
             "Use `refresh=true` only after files were added or renamed. When you work out what a file does, "

@@ -28,6 +28,12 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **Always pass `project` with your workspace root** (e.g. `project="D:\\\\work\\\\shop"`) on every Tacit call. One Tacit MCP server can serve several workspaces at once; without `project` a call can only fall back to the directory the server was launched in, which may be a different repository.
 * If a Tacit call reports **no workspace identified**, that is the reason: re-issue it with `project` set to your workspace root.
 
+## Pinned Memories (Pinned by DEV)
+* **Always pay special attention to memories in the `Pinned by DEV` section** at the end of `memory_context`.
+* Pinned memories represent critical tacit knowledge, key invariants, and high-priority constraints directly pinned by developers.
+* They appear at the end of `memory_context` **disregard of their score**, meaning they must never be overlooked simply because they are older or outside the top PageRank nodes.
+* Both developers and agents can pin or unpin memories using `tacit pin <id ...>` (CLI) or the `memory_pin(ids=[...])` tool.
+
 ## Writing Titles (they are the search index):
 * **Every entry MUST have a `title`, and it must be specific.** Only the **title, tags and summary** are embedded into the vector index — the full `content` is not. A vague title therefore makes a memory effectively unfindable by semantic search, no matter how good the content is.
 * **Write the title as a self-contained phrase that names the subject**, not a label or a category echo:
@@ -111,7 +117,7 @@ Confusable pairs — resolve them this way:
 * **Heed Interactive Warnings**: If `memory_add` responds with a `[TACIT GRAPH NOTICE]` suggesting candidate parents, immediately review them and call `memory_link(child_id=..., parent_id=...)` to preserve graph lineage.
 
 ## Mandatory Agent Workflow:
-1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(project=<your workspace root>)` to load relevance-ranked decisions, active hacks, and solved errors into your context. Add `scope_hint` when the task is confined to one subsystem.
+1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(project=<your workspace root>)` to load relevance-ranked decisions, active hacks, and solved errors into your context. Add `scope_hint` when the task is confined to one subsystem. **Carefully read any pinned memories at the end of the briefing (`Pinned by DEV`)**, as they are important tacit knowledge pinned by DEV.
 2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.
 3. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
    - `project`: Your workspace root, so the entry lands in this repository's store.

@@ -901,3 +901,79 @@ Merkle Root: {node.merkle_root}
             "count": count,
             "message": f"Cleared all {count} memories from project storage.",
         }
+
+    @_guarded
+    def handle_memory_pin(
+        self,
+        ids: Any = None,
+        unpin: bool = False,
+        project: Optional[str] = None,
+        memory_ids: Any = None,
+    ) -> Dict[str, Any]:
+        """Pin or unpin an array of memory IDs so they appear at the end of memory_context."""
+        storage = self._resolve_storage(project)
+
+        raw_ids = ids if ids is not None else memory_ids
+        if raw_ids is None:
+            raw_ids = []
+
+        if isinstance(raw_ids, str):
+            stripped = raw_ids.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                import json
+                try:
+                    target_ids = json.loads(stripped)
+                except Exception:
+                    target_ids = [s.strip().strip("'\"") for s in stripped[1:-1].split(",") if s.strip()]
+            else:
+                target_ids = [s.strip().strip("'\"") for s in stripped.split(",") if s.strip()]
+        elif isinstance(raw_ids, (list, tuple, set)):
+            target_ids = [str(i).strip() for i in raw_ids if str(i).strip()]
+        else:
+            target_ids = [str(raw_ids).strip()]
+
+        if not target_ids:
+            return {
+                "success": False,
+                "count": 0,
+                "error": "No memory IDs provided to pin.",
+                "message": "[TACIT] No memory IDs provided to pin.",
+                "formatted": "[TACIT] No memory IDs provided to pin.",
+            }
+
+        if unpin:
+            res = storage.unpin_memories(target_ids)
+            unpinned = res.get("unpinned", [])
+            msg = (
+                f"Successfully unpinned {len(unpinned)} memory node(s): {', '.join(unpinned)}"
+                if unpinned
+                else "No matching pinned memories were found to unpin."
+            )
+            return {
+                "success": len(unpinned) > 0,
+                "action": "unpin",
+                "count": len(unpinned),
+                "unpinned": unpinned,
+                "message": f"[TACIT] {msg}",
+                "formatted": msg,
+            }
+        else:
+            res = storage.pin_memories(target_ids, pinned_by="dev")
+            pinned = res.get("pinned", [])
+            not_found = res.get("not_found", [])
+            lines = []
+            if pinned:
+                lines.append(f"Successfully pinned {len(pinned)} memory node(s): {', '.join(pinned)}")
+                lines.append("These memories will appear at the end of memory_context regardless of score.")
+            if not_found:
+                lines.append(f"Warning: {len(not_found)} ID(s) not found in memory storage: {', '.join(not_found)}")
+            formatted = "\n".join(lines)
+            return {
+                "success": len(pinned) > 0,
+                "action": "pin",
+                "count": len(pinned),
+                "pinned": pinned,
+                "not_found": not_found,
+                "message": f"[TACIT] {formatted}",
+                "formatted": formatted,
+            }

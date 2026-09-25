@@ -95,6 +95,14 @@ class MemoryStorage:
                 """)
 
                 conn.execute("""
+                    CREATE TABLE IF NOT EXISTS pinned_memories (
+                        id TEXT PRIMARY KEY,
+                        pinned_at REAL NOT NULL,
+                        pinned_by TEXT NOT NULL DEFAULT 'dev'
+                    )
+                """)
+
+                conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_timestamp 
                     ON memories(timestamp)
                 """)
@@ -510,6 +518,11 @@ class MemoryStorage:
             try:
                 cursor = conn.execute("DELETE FROM memories WHERE id = ?", (node_id,))
                 deleted = cursor.rowcount > 0
+                if deleted:
+                    try:
+                        conn.execute("DELETE FROM pinned_memories WHERE id = ?", (node_id,))
+                    except Exception:
+                        pass
                 if self._fts_available and deleted:
                     conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (node_id,))
                 conn.commit()
@@ -531,6 +544,117 @@ class MemoryStorage:
                     LIMIT ?
                 """, (limit,)).fetchall()
                 return [MemoryNode.from_dict(dict(row)) for row in rows]
+            finally:
+                conn.close()
+
+    def pin_memories(
+        self, ids: List[str], pinned_by: str = "dev"
+    ) -> Dict[str, Any]:
+        """Pin a list of memory IDs so they appear at the end of memory_context.
+
+        Returns a dictionary with 'pinned', 'not_found', and 'count'.
+        """
+        import time
+
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                pinned = []
+                not_found = []
+                now = time.time()
+                for mid in ids:
+                    mid_clean = str(mid).strip()
+                    if not mid_clean:
+                        continue
+                    row = conn.execute("SELECT id FROM memories WHERE id = ?", (mid_clean,)).fetchone()
+                    if not row:
+                        not_found.append(mid_clean)
+                        continue
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO pinned_memories (id, pinned_at, pinned_by)
+                        VALUES (?, ?, ?)
+                        """,
+                        (mid_clean, now, pinned_by),
+                    )
+                    pinned.append(mid_clean)
+                conn.commit()
+                return {
+                    "pinned": pinned,
+                    "not_found": not_found,
+                    "count": len(pinned),
+                }
+            finally:
+                conn.close()
+
+    def unpin_memories(self, ids: List[str]) -> Dict[str, Any]:
+        """Unpin a list of memory IDs.
+
+        Returns a dictionary with 'unpinned' and 'count'.
+        """
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                unpinned = []
+                for mid in ids:
+                    mid_clean = str(mid).strip()
+                    if not mid_clean:
+                        continue
+                    cur = conn.execute("DELETE FROM pinned_memories WHERE id = ?", (mid_clean,))
+                    if cur.rowcount > 0:
+                        unpinned.append(mid_clean)
+                conn.commit()
+                return {
+                    "unpinned": unpinned,
+                    "count": len(unpinned),
+                }
+            finally:
+                conn.close()
+
+    def clear_pinned_memories(self) -> int:
+        """Clear all pinned memories."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cur = conn.execute("DELETE FROM pinned_memories")
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+
+    def get_pinned_ids(self) -> List[str]:
+        """Get IDs of all pinned memories in chronological order of pinning."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute("SELECT id FROM pinned_memories ORDER BY pinned_at ASC").fetchall()
+                return [r[0] for r in rows]
+            finally:
+                conn.close()
+
+    def get_pinned_memories(self) -> List[MemoryNode]:
+        """Retrieve full MemoryNode instances for all pinned memories in order of pinning."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT m.* FROM memories m
+                    JOIN pinned_memories p ON m.id = p.id
+                    ORDER BY p.pinned_at ASC
+                    """
+                ).fetchall()
+                return [MemoryNode.from_dict(dict(r)) for r in rows]
+            finally:
+                conn.close()
+
+    def is_pinned(self, node_id: str) -> bool:
+        """Check if a memory ID is currently pinned."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute("SELECT 1 FROM pinned_memories WHERE id = ?", (node_id,)).fetchone()
+                return row is not None
             finally:
                 conn.close()
 
@@ -817,6 +941,7 @@ class MemoryStorage:
                 try:
                     conn.execute("DELETE FROM edges")
                     conn.execute("DELETE FROM lifecycle_events")
+                    conn.execute("DELETE FROM pinned_memories")
                 except Exception:
                     pass
                 conn.commit()

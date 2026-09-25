@@ -271,6 +271,22 @@ class BootstrapEngine:
         return f"  {dominant_tag(node):<12} • {title_or_summary} (`{node.id}`)"
 
     @classmethod
+    def render_pinned_node(cls, node: MemoryNode, now_ts: float) -> str:
+        """Render complete content block for pinned entry (disregard of score)."""
+        age_days = int(max(0.0, (now_ts - node.timestamp) / 86400.0))
+        age_str = f"{age_days}d old" if age_days > 0 else "today"
+
+        lines = [
+            f"★ PINNED · {node.type.upper()} · {node.impact.capitalize()} impact · {age_str} (`{node.id}`)",
+            f'  "{node.title or node.summary}"',
+            f"  {node.content.strip()}",
+        ]
+        if node.parents:
+            parent_refs = ", ".join(f"`{p}`" for p in node.parents)
+            lines.append(f"  ↳ built on: {parent_refs}")
+        return "\n".join(lines)
+
+    @classmethod
     def assemble(
         cls,
         ranked: List[ScoredNode],
@@ -356,14 +372,19 @@ class BootstrapEngine:
 
         # Stage 1: Select active candidates
         active_nodes = storage.get_active_memories()
-        if not active_nodes:
+        pinned_nodes = storage.get_pinned_memories() if hasattr(storage, "get_pinned_memories") else []
+        pinned_ids = {n.id for n in pinned_nodes}
+
+        if not active_nodes and not pinned_nodes:
             return {
                 "count": 0,
                 "full_count": 0,
                 "brief_count": 0,
+                "pinned_count": 0,
                 "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n{map_line}\n(No active institutional memories found. Project starts with empty context.)\n═══════════════════════════════════════════════════════",
                 "full": [],
                 "brief": {},
+                "pinned": [],
             }
 
         # Stage 2: Graph analysis & feature computation
@@ -392,20 +413,13 @@ class BootstrapEngine:
         authority_scores = compute_authority(active_nodes, edges)
 
         # Timeframe narrows what is shown, never the graph used to rank it.
+        # Exclude pinned nodes from candidate ranking so they appear at the end disregard of score
+        unpinned_active = [n for n in active_nodes if n.id not in pinned_ids]
         candidates = (
-            [n for n in active_nodes if n.timestamp >= cutoff_ts]
+            [n for n in unpinned_active if n.timestamp >= cutoff_ts]
             if cutoff_ts is not None
-            else list(active_nodes)
+            else list(unpinned_active)
         )
-        if not candidates:
-            return {
-                "count": 0,
-                "full_count": 0,
-                "brief_count": 0,
-                "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n\n(No active memories in timeframe '{timeframe}'.)\n═══════════════════════════════════════════════════════",
-                "full": [],
-                "brief": {},
-            }
 
         hints = [h.strip() for h in (scope_hint or []) if h and h.strip()]
         project_root = None
@@ -413,23 +427,46 @@ class BootstrapEngine:
             project_root = Config.project_root_for_db(storage.db_path)
         except Exception:
             project_root = None
-        # Stage 3: Score all candidates.
-        #
-        # Scope is a FILTER: a caller working in `backend/app` is not shown
-        # memories recorded against `frontend/`, so a briefing can never mix
-        # subsystems (or, when a store was wrongly shared, repositories).
-        # Project-wide memories are the exception - they belong everywhere.
+
         if hints:
             candidates = [
                 node for node in candidates
                 if node_matches_scope(node.scope or [], hints, project_root=project_root)
             ]
-            if not candidates:
+
+        full_tier: List[ScoredNode] = []
+        brief_tier: Dict[str, List[ScoredNode]] = {}
+
+        if candidates:
+            scored_candidates: List[Tuple[float, MemoryNode, Features]] = []
+            for node in candidates:
+                features = cls.compute_node_features(
+                    node=node,
+                    now_ts=now_ts,
+                    authority=authority_scores.get(node.id, 0.0),
+                    superseded_events=superseded_events,
+                    neighbor_map=neighbor_map,
+                )
+                score_val = cls.score(features, node.type)
+                # Drop negatively scored nodes (actively misleading)
+                if score_val >= 0.0:
+                    scored_candidates.append((score_val, node, features))
+
+            if scored_candidates:
+                # Stage 4: Rank + Diversity Guard
+                ranked_nodes = cls.rank_and_diversify(scored_candidates)
+
+                # Stage 5: Token-budgeted Assembly
+                full_tier, brief_tier = cls.assemble(ranked_nodes, budget=budget, now_ts=now_ts)
+
+        if not full_tier and not brief_tier and not pinned_nodes:
+            if hints and not candidates:
                 scope_text = ", ".join(hints)
                 return {
                     "count": 0,
                     "full_count": 0,
                     "brief_count": 0,
+                    "pinned_count": 0,
                     "scope": hints,
                     "formatted": (
                         f"════ PROJECT BRIEFING · generated {date_str} ════\n\n"
@@ -440,48 +477,41 @@ class BootstrapEngine:
                     ),
                     "full": [],
                     "brief": {},
+                    "pinned": [],
                 }
-
-        scored_candidates: List[Tuple[float, MemoryNode, Features]] = []
-        for node in candidates:
-            features = cls.compute_node_features(
-                node=node,
-                now_ts=now_ts,
-                authority=authority_scores.get(node.id, 0.0),
-                superseded_events=superseded_events,
-                neighbor_map=neighbor_map,
-            )
-            score_val = cls.score(features, node.type)
-            # Drop negatively scored nodes (actively misleading)
-            if score_val >= 0.0:
-                scored_candidates.append((score_val, node, features))
-
-        if not scored_candidates:
+            if cutoff_ts is not None and not candidates:
+                return {
+                    "count": 0,
+                    "full_count": 0,
+                    "brief_count": 0,
+                    "pinned_count": 0,
+                    "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n\n(No active memories in timeframe '{timeframe}'.)\n═══════════════════════════════════════════════════════",
+                    "full": [],
+                    "brief": {},
+                    "pinned": [],
+                }
             return {
                 "count": 0,
                 "full_count": 0,
                 "brief_count": 0,
+                "pinned_count": 0,
                 "formatted": f"════ PROJECT BRIEFING · generated {date_str} ════\n\n(No high-relevance active memories found.)\n═══════════════════════════════════════════════════════",
                 "full": [],
                 "brief": {},
+                "pinned": [],
             }
-
-        # Stage 4: Rank + Diversity Guard
-        ranked_nodes = cls.rank_and_diversify(scored_candidates)
-
-        # Stage 5: Token-budgeted Assembly
-        full_tier, brief_tier = cls.assemble(ranked_nodes, budget=budget, now_ts=now_ts)
 
         # Stage 6: Render output briefing
         lines = [
             f"════ PROJECT BRIEFING · generated {date_str} ════\n",
             map_line,
-            "── Core context (read fully) ──────────────────────────",
         ]
 
-        for item in full_tier:
-            lines.append(cls.render_full_node(item, now_ts))
-            lines.append("")
+        if full_tier:
+            lines.append("── Core context (read fully) ──────────────────────────")
+            for item in full_tier:
+                lines.append(cls.render_full_node(item, now_ts))
+                lines.append("")
 
         if brief_tier:
             lines.append("── Also relevant ──────────────────────────────────────")
@@ -490,18 +520,26 @@ class BootstrapEngine:
                     lines.append(cls.render_summary_node(item))
             lines.append("")
 
+        if pinned_nodes:
+            lines.append("── Pinned by DEV (important tacit knowledge) ──────────")
+            for node in pinned_nodes:
+                lines.append(cls.render_pinned_node(node, now_ts))
+                lines.append("")
+
         lines.append("═══════════════════════════════════════════════════════")
         briefing_text = "\n".join(lines)
 
         total_brief = sum(len(v) for v in brief_tier.values())
 
         return {
-            "count": len(full_tier) + total_brief,
+            "count": len(full_tier) + total_brief + len(pinned_nodes),
             "full_count": len(full_tier),
             "brief_count": total_brief,
+            "pinned_count": len(pinned_nodes),
             "scope": hints,
             "project": str(project_root) if project_root else None,
             "formatted": briefing_text,
             "full": [item.node.to_dict() for item in full_tier],
             "brief": {tag: [item.node.to_dict() for item in items] for tag, items in brief_tier.items()},
+            "pinned": [node.to_dict() for node in pinned_nodes],
         }

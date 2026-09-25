@@ -342,4 +342,28 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "required": ["path"],
         },
     },
+    {
+        "name": "memory_pin",
+        "description": "Pin or unpin memories so they always appear at the end of memory_context regardless of their score. Pinned memories represent important tacit knowledge and critical invariants curated by developers that agents must always pay attention to.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Array of memory IDs (UUIDs) to pin or unpin.",
+                },
+                "unpin": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "If true, unpin the specified memories instead of pinning them.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace: absolute project root path or registered name.",
+                },
+            },
+            "required": ["ids"],
+        },
+    },
 ]

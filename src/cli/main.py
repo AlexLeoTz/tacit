@@ -6,7 +6,7 @@ import platform
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 import uuid
 import yaml
 from rich.console import Console
@@ -893,6 +893,141 @@ def recent(
 
     console.print(table)
     _print_ids(memories)
+
+
+@app.command()
+def pin(
+    ids: Optional[List[str]] = typer.Argument(
+        None, help="Memory IDs to pin (or unpin with --unpin)"
+    ),
+    unpin: bool = typer.Option(
+        False, "--unpin", "-u", help="Unpin the specified memory IDs"
+    ),
+    list_pinned: bool = typer.Option(
+        False, "--list", "-l", help="List all currently pinned memories"
+    ),
+    clear: bool = typer.Option(
+        False, "--clear", help="Unpin all pinned memories"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+):
+    """Pin an array of memory IDs so they appear at the end of memory context regardless of score."""
+    storage = get_storage(project)
+
+    # 1. Clear all pinned memories if --clear
+    if clear:
+        count = storage.clear_pinned_memories()
+        console.print(f"[green]Cleared all {count} pinned memory node(s).[/green]")
+        return
+
+    # Normalize input IDs (flatten list, support comma-separated or json string)
+    target_ids: List[str] = []
+    if ids:
+        for item in ids:
+            item_str = str(item).strip()
+            if item_str.startswith("[") and item_str.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(item_str)
+                    if isinstance(parsed, list):
+                        target_ids.extend(str(x).strip() for x in parsed if str(x).strip())
+                        continue
+                except Exception:
+                    pass
+                target_ids.extend(s.strip().strip("'\"") for s in item_str[1:-1].split(",") if s.strip())
+            elif "," in item_str:
+                target_ids.extend(s.strip().strip("'\"") for s in item_str.split(",") if s.strip())
+            else:
+                target_ids.append(item_str.strip("'\""))
+
+    # 2. List currently pinned memories if --list or if no IDs provided
+    if list_pinned or not target_ids:
+        pinned = storage.get_pinned_memories()
+        if not pinned:
+            console.print("[yellow]No memories are currently pinned in this project.[/yellow]")
+            console.print("[dim]Pin memories using: tacit pin <memory_id> [<memory_id> ...][/dim]")
+            return
+
+        table = Table(
+            title=f"Pinned Memories ({len(pinned)}) · Always appear in context",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        table.add_column("ID", style="cyan", width=38)
+        table.add_column("Type", style="magenta", width=14)
+        table.add_column("Title / Summary", style="white")
+
+        for node in pinned:
+            table.add_row(
+                node.id,
+                _esc(f"[{node.type}]"),
+                _esc(node.title or node.summary),
+            )
+        console.print(table)
+        console.print("[dim]These memories appear at the end of memory context regardless of score.[/dim]")
+        return
+
+    # 3. Unpin memories
+    if unpin:
+        res = storage.unpin_memories(target_ids)
+        unpinned = res.get("unpinned", [])
+        if unpinned:
+            console.print(f"[green]Unpinned {len(unpinned)} memory node(s):[/green]")
+            for uid in unpinned:
+                console.print(f"  • [cyan]{uid}[/cyan]")
+        else:
+            console.print("[yellow]None of the specified memory IDs were pinned.[/yellow]")
+        return
+
+    # 4. Pin memories
+    valid_ids: List[str] = []
+    not_found: List[str] = []
+    for mid in target_ids:
+        node = storage.get_memory(mid)
+        if node:
+            valid_ids.append(mid)
+        else:
+            not_found.append(mid)
+
+    if not_found:
+        for mid in not_found:
+            console.print(f"[red]Memory ID '{mid}' not found in storage.[/red]")
+            candidates = storage.find_id_candidates(mid)
+            if candidates:
+                console.print("[yellow]Did you mean:[/yellow]")
+                _print_ids(candidates)
+
+    if not valid_ids:
+        console.print("[red]No valid memory IDs to pin.[/red]")
+        raise typer.Exit(code=1)
+
+    res = storage.pin_memories(valid_ids, pinned_by="dev")
+    pinned_ids = res.get("pinned", [])
+
+    table = Table(
+        title=f"Pinned {len(pinned_ids)} Memory Node(s)",
+        show_header=True,
+        header_style="bold green",
+    )
+    table.add_column("ID", style="cyan", width=38)
+    table.add_column("Type", style="magenta", width=14)
+    table.add_column("Title / Summary", style="white")
+
+    for mid in pinned_ids:
+        node = storage.get_memory(mid)
+        if node:
+            table.add_row(
+                node.id,
+                _esc(f"[{node.type}]"),
+                _esc(node.title or node.summary),
+            )
+    console.print(table)
+    console.print(
+        "[bold green]Pinned successfully![/bold green] "
+        "[dim]These memories will appear at the end of memory context regardless of score.[/dim]"
+    )
 
 
 @app.command(name="tree")
