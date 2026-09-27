@@ -113,7 +113,17 @@ def purelib_dir() -> Path:
 
 
 def config_dir() -> Path:
-    """Directory holding Tacit's global, per-user state (update cache/log/status)."""
+    """Directory holding Tacit's global, per-user state (update cache/log/status).
+
+    ``TACIT_HOME`` overrides it, matching :func:`src.utils.config.tacit_home`, so
+    a test run or a sandboxed job cannot write into the developer's real
+    ``~/.gemini/config``. The override is resolved here rather than imported from
+    the config module on purpose: this file must stay importable with nothing but
+    the standard library while the installed package is being replaced.
+    """
+    override = os.environ.get("TACIT_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
     return Path.home() / ".gemini" / "config"
 
 

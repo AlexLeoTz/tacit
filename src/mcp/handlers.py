@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from ..core.memory_node import MemoryNode
-from ..core.storage import MemoryStorage
+from ..core.storage import MemoryStorage, count_memories_readonly
 from ..search.full_text import FullTextSearch
 from ..search.temporal import TemporalSearch
 from ..utils.config import Config, ProjectRootError
@@ -728,6 +728,41 @@ Merkle Root: {node.merkle_root}
         return briefing_res
 
     @_guarded
+    def handle_memory_chronicle(
+        self,
+        scope_hint: Optional[List[str]] = None,
+        type: Optional[str] = None,
+        timeframe: str = "all",
+        limit: int = 100,
+        brief: bool = False,
+        include_superseded: bool = True,
+        include_retracted: bool = False,
+        content_chars: int = 4000,
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the project's entire memory history, oldest first.
+
+        The deliberate opposite of ``memory_context``: no ranking, no budget, no
+        diversity guard — every memory in the order it was recorded, including
+        the superseded ones, for "how did this project get here" analysis.
+        """
+        from ..core.chronicle import ChronicleEngine
+
+        storage = self._resolve_storage(project)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
+        return ChronicleEngine.build(
+            storage=storage,
+            scope_hint=scope_hint or None,
+            memory_type=type,
+            timeframe=timeframe,
+            include_superseded=include_superseded,
+            include_retracted=include_retracted,
+            limit=limit,
+            brief=brief,
+            content_chars=content_chars,
+        )
+
+    @_guarded
     def handle_project_structure(
         self,
         refresh: bool = False,
@@ -789,13 +824,13 @@ Merkle Root: {node.merkle_root}
         root = self._root_for(storage)
         store_dir = Config.get_memory_dir(root)
 
-        raw = str(path or "").replace("\\", "/").strip()
-        if not raw:
+        # Normalised once here, so a dotfile keeps its dot (`.env`, not `env`).
+        relative = project_tree.normalise_rel_path(path)
+        if not relative:
             return {
                 "success": False,
                 "message": "[TACIT] project_gist needs a `path` relative to the project root.",
             }
-        relative = raw.lstrip("/")
         target = (root / relative)
         try:
             exists = target.exists()
@@ -812,30 +847,129 @@ Merkle Root: {node.merkle_root}
             }
 
         try:
-            stored = project_tree.set_gist(store_dir, relative, gist, author=author)
+            # The file table is the source of truth; this also records lines,
+            # size and content hash so the row can be detected as stale later.
+            stored = project_tree.set_file_row(
+                root, store_dir, relative, description=gist, by=author
+            )
         except OSError as exc:
             return {
                 "success": False,
                 "path": relative,
-                "message": f"[TACIT] Could not store the gist: {exc}",
+                "message": f"[TACIT] Could not store the file row: {exc}",
             }
 
-        if stored is None:
+        if stored is None or not str(stored.get("description") or "").strip():
             return {
                 "success": True,
                 "path": relative,
                 "removed": True,
-                "message": f"Gist removed for '{relative}'.",
+                "message": f"Description cleared for '{relative}'.",
             }
         return {
             "success": True,
             "path": relative,
-            "gist": stored["gist"],
+            "description": stored.get("description"),
+            "lines": stored.get("lines"),
             "message": (
-                f"Gist recorded for '{relative}': {stored['gist']}\n"
+                f"File row updated for '{relative}' "
+                f"({project_tree.format_lines(int(stored.get('lines') or 0))} LOC, "
+                f"by {stored.get('by')}): {stored.get('description')}\n"
                 "It now appears beside that file in `project_structure`."
             ),
         }
+
+    @_guarded
+    def handle_project_files_pending(
+        self,
+        limit: int = 25,
+        include_facts: bool = True,
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List files whose row is missing or stale, ready for an agent to fill.
+
+        Line counts, sizes and hashes are computed here, so the agent only has to
+        supply a description — and it can supply many at once through
+        ``project_files_update``, which is what "fill the table in parallel"
+        means in practice.
+        """
+        from ..core import project_tree
+
+        storage = self._resolve_storage(project)
+        root = self._root_for(storage)
+        store_dir = Config.get_memory_dir(root)
+
+        res = project_tree.pending_files(root, store_dir, limit=limit, include_facts=include_facts)
+        if res["total_pending"] == 0:
+            res["formatted"] = (
+                f"File table is current: all {res['total_files']} files have a fresh row "
+                "with a description. Nothing to fill."
+            )
+            return res
+
+        lines = [
+            f"{res['total_pending']} file(s) need a row "
+            f"({res['described']}/{res['total_files']} described). Showing {res['returned']}:",
+            "",
+        ]
+        for entry in res["files"]:
+            facts = ""
+            if include_facts:
+                facts = f" ({project_tree.format_lines(entry.get('lines', 0))} LOC"
+                if entry.get("language"):
+                    facts += f", {entry['language']}"
+                facts += ")"
+            reasons = ", ".join(entry.get("reasons") or [])
+            lines.append(f"- {entry['path']}{facts} — {reasons}")
+        lines += [
+            "",
+            "Write descriptions in parallel batches with `project_files_update`, e.g.",
+            '  project_files_update(entries=[{"path": "...", "description": "contains the payment logic; 12.4k LOC of gateway + refund handling"}, ...])',
+            "One compact sentence per file saying what actually lives there. Line counts,",
+            "sizes and hashes are recorded by Tacit — do not include them in the description.",
+        ]
+        res["formatted"] = "\n".join(lines)
+        return res
+
+    @_guarded
+    def handle_project_files_update(
+        self,
+        entries: List[Dict[str, Any]],
+        by: str = "ai-agent",
+        project: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Write many file-table rows at once, recording who and when."""
+        from ..core import project_tree
+
+        storage = self._resolve_storage(project)
+        root = self._root_for(storage)
+        store_dir = Config.get_memory_dir(root)
+
+        res = project_tree.update_file_rows(root, store_dir, entries or [], by=by)
+        lines = [
+            f"File table updated: {res['count']} row(s) by {by}."
+        ]
+        for row in res["written"]:
+            lines.append(
+                f"- {row['path']} ({project_tree.format_lines(int(row.get('lines') or 0))} LOC): "
+                f"{row.get('description') or '(facts only)'}"
+            )
+        for error in res["errors"]:
+            lines.append(f"- REJECTED {error['path'] or '(empty path)'}: {error['error']}")
+        if res["errors"]:
+            lines.append(
+                "Rejected entries were skipped, so the others were still recorded. "
+                "Paths must exist and be project-relative."
+            )
+        if res["count"]:
+            remaining = project_tree.pending_files(root, store_dir, limit=1)
+            lines.append(
+                f"{remaining['total_pending']} file(s) still pending."
+                if remaining["total_pending"]
+                else "The file table is now complete."
+            )
+        res["formatted"] = "\n".join(lines)
+        return res
 
     @_guarded
     def handle_memory_projects(self) -> Dict[str, Any]:
@@ -850,13 +984,9 @@ Merkle Root: {node.merkle_root}
         for name, path_str in sorted(registered.items()):
             root = Path(path_str)
             db_path = Config.get_db_path(root)
-            count = 0
-            if db_path.exists():
-                try:
-                    s = MemoryStorage(db_path)
-                    count = s.get_count()
-                except Exception:
-                    count = 0
+            # Read-only: listing projects must not migrate the stores it reports
+            # on, and must not pay a schema bootstrap for each of them.
+            count = count_memories_readonly(db_path)
 
             projects_summary.append({
                 "name": name,

@@ -1,6 +1,6 @@
 """Unit tests for MCP Handlers and CLI interface commands."""
 
-import tempfile
+from support import workspace_tempdir
 from pathlib import Path
 import pytest
 from typer.testing import CliRunner
@@ -14,7 +14,7 @@ from src.utils.config import Config
 
 @pytest.fixture
 def mcp_fixture():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / "mcp_test.db"
         storage = MemoryStorage(db_path)
         handlers = MemoryMCPHandlers(storage)
@@ -92,7 +92,7 @@ def test_mcp_add_batch(mcp_fixture):
 
 def test_cli_commands():
     runner = CliRunner()
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    with workspace_tempdir() as tmpdir:
         test_dir = Path(tmpdir) / "cli_memories"
 
         # Every command targets tmpdir explicitly: running `init` without --dir
@@ -142,7 +142,7 @@ def test_cli_commands():
 
 def test_multi_project_mcp(mcp_fixture):
     _, handlers = mcp_fixture
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    with workspace_tempdir() as tmpdir:
         proj_a = Path(tmpdir) / "project_alpha"
         proj_b = Path(tmpdir) / "project_beta"
 
@@ -196,7 +196,7 @@ def test_delete_and_clear_mcp(mcp_fixture):
 
 def test_delete_cli_command():
     runner = CliRunner()
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    with workspace_tempdir() as tmpdir:
         test_dir = Path(tmpdir) / "cli_del_test"
 
         runner.invoke(app, ["init", "--dir", str(test_dir)])
@@ -215,7 +215,7 @@ def test_delete_cli_command():
 
 
 def test_memory_add_strict_schema():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    with workspace_tempdir() as tmpdir:
         test_dir = Path(tmpdir) / "strict_test"
         db_path = Config.get_db_path(test_dir)
         storage = MemoryStorage(db_path)
@@ -253,7 +253,7 @@ def test_memory_add_strict_schema():
 
 
 def test_orphan_warning_and_memory_link():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+    with workspace_tempdir() as tmpdir:
         test_dir = Path(tmpdir) / "orphan_test"
         db_path = Config.get_db_path(test_dir)
         storage = MemoryStorage(db_path)
@@ -309,7 +309,7 @@ def test_serve_when_already_running(monkeypatch):
         assert "A Tacit server instance is already running at" in result.output
 
 def test_project_root_parent_and_alias_resolution():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         sokosupa_parent = Path(tmpdir) / "Sokosupa"
         workspace = sokosupa_parent / "sokosupa.com"
         workspace.mkdir(parents=True)

@@ -10,6 +10,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def tacit_home() -> Path:
+    """Directory holding Tacit's global, per-user state.
+
+    That is the cross-project registry and the update cache — state which is
+    *about the machine*, not about one repository. ``TACIT_HOME`` overrides it so
+    a test run, a sandboxed CI job or a portable install keeps that state inside
+    its own directory instead of writing into the developer's real
+    ``~/.gemini/config``. Without the override, running the test suite would
+    register every temporary mock project on the developer's machine.
+    """
+    override = os.getenv("TACIT_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".gemini" / "config"
+
+
 class ProjectRootError(RuntimeError):
     """Raised when Tacit cannot identify a real project to store memories for.
 
@@ -33,7 +49,8 @@ class Config:
     #: Pointer inside the marker directory naming the real store after `tacit move`.
     MEMORY_LOCATION_FILE = "location"
     DEFAULT_EXPORT_DIR_NAME = "memory-export"
-    REGISTRY_FILE: Path = Path.home() / ".gemini" / "config" / "tacit_projects.json"
+    #: Cross-project registry; see :func:`tacit_home` for the override.
+    REGISTRY_FILE: Path = tacit_home() / "tacit_projects.json"
 
     PREVIEW_PORT: int = int(os.getenv("PREVIEW_PORT", "4000"))
     PREVIEW_WS_PORT: int = int(os.getenv("PREVIEW_WS_PORT", "4001"))

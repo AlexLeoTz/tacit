@@ -19,10 +19,24 @@ You are connected to Tacit to preserve engineering decisions across chat resets.
 * **When recording, `scope` is mandatory and is never empty.** It is the filter future sessions apply, so a missing or wrong scope makes the memory unfindable. Give the affected folders or files (e.g. `['src/api/auth.py']`, or a directory such as `backend/app/Models`), and use the **project name** for knowledge that applies to the whole workspace. Paths are validated against the project root: a typo is rejected rather than stored.
 
 ## Orient Before You Explore: `project_structure`
-* **Call `project_structure` once when you start working in an unfamiliar area.** It returns the captured workspace map — directories and file names, plus any stored per-file gist — so you learn where things live without opening files one by one. It never contains source code.
+* **Call `project_structure` once when you start working in an unfamiliar area.** It returns the captured workspace map — directories and file names, each file annotated with its line count and its recorded description — so you learn where things live without opening files one by one. It never contains source code.
 * **Do not re-render it habitually**: the map is a snapshot. Pass `refresh=true` only after files were added, renamed or deleted, and `path` to narrow it to the directory you care about.
-* **Record what you learn with `project_gist(path=..., gist=...)`** whenever you work out what a file is for (one informative sentence, project-relative path). The next session then inherits that knowledge beside the file name instead of re-reading the file. A gist is a map label, not a summary of a whole subsystem.
 * If the map is missing or stale beyond your change, `tacit structure --refresh` (CLI) rebuilds it; `tacit structure --set-repos backend,frontend` pins the repositories tracked in a multi-repo workspace.
+
+## The File Table: Keep It Filled and Current
+Every file in the map has a **table row**: lines of code, size, language, content hash, a compact description of what lives inside it, plus who last wrote the row and when. Tacit computes the mechanical half; **you** write the description, and you are responsible for keeping it true.
+
+* **At the start of a session, call `project_files_pending`.** It lists the files whose row is missing or stale, with line counts already computed. If it reports nothing to do, move on — do not call it again in the same session.
+* **Fill the table in parallel batches, not one call per file:** take the listed paths and issue a *single* `project_files_update(entries=[...])` with as many entries as you can describe accurately (10–30 at a time). Describing thirty files in one call is the intended workflow; thirty calls are not.
+* **Write what lives in the file, not what it is named.** `contains the payment logic: gateway calls, refunds, receipt generation` is useful; `payment file` is not. One compact sentence, no line counts, no size, no code.
+* **After you change a file, refresh its row** — the same `project_files_update` call you use for fills, or `project_gist(path=..., gist=...)` for a single file. A row whose stored hash no longer matches the file is reported as stale until you do, and a stale row is worse than no row: it misleads the next session.
+* **When you learn what an undescribed file does, record it immediately**, even outside the pending list — it costs one line and saves the next session a full read.
+* From a terminal: `tacit files --pending`, `tacit files --set <path> --description "..."`, `tacit files --refresh` (recompute lines/hash), `tacit files --stats`, `tacit files --prune`.
+
+## Deep History: `memory_chronicle`
+* **Use `memory_chronicle` when the task is to understand the project's history**, not its current state: "why is it built this way", "have we tried this before", "summarise every decision since day one". It returns **every** memory oldest-first, including superseded ones, with no ranking and no budget.
+* **It is large by design.** Start with `brief=true` to read the timeline cheaply, then re-read the specific window or category you care about (`type`, `timeframe`, `scope_hint`). Only pull full content (`brief=false`, `limit=0`) when you genuinely need to reason over the whole history.
+* **`memory_context` and `memory_chronicle` are complements, not substitutes**: the briefing tells you what to obey now, the chronicle tells you how the codebase arrived there.
 
 ## Choose Your Workspace (`project`)
 * **Always pass `project` with your workspace root** (e.g. `project="D:\\\\work\\\\shop"`) on every Tacit call. One Tacit MCP server can serve several workspaces at once; without `project` a call can only fall back to the directory the server was launched in, which may be a different repository.
@@ -118,8 +132,9 @@ Confusable pairs — resolve them this way:
 
 ## Mandatory Agent Workflow:
 1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(project=<your workspace root>)` to load relevance-ranked decisions, active hacks, and solved errors into your context. Add `scope_hint` when the task is confined to one subsystem. **Carefully read any pinned memories at the end of the briefing (`Pinned by DEV`)**, as they are important tacit knowledge pinned by DEV.
-2. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.
-3. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
+2. **Orient and fill the file table**: call `project_structure` for the map, then `project_files_pending`; if it lists files, describe them in one batched `project_files_update` call before starting the task (see *The File Table* above).
+3. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated. Use `memory_chronicle` when the question is historical rather than current.
+4. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
    - `project`: Your workspace root, so the entry lands in this repository's store.
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).
    - `scope`: The affected folder or subsystem, relative to the project root (e.g. ['backend/app/Models'], or the project name for workspace-wide knowledge). This is mandatory: it is the filter every future read applies. Paths must exist in the project or the write is rejected.
@@ -132,6 +147,7 @@ Confusable pairs — resolve them this way:
    - **Step 3 — State the verification**: how the change was proven to work (tests added, commands run, manual checks performed). An entry with no verification evidence is incomplete.
    - **Step 4 — Link the graph**: pass `parents` for any memory this builds on and `supersedes` for any past memory this invalidates. When one task produces both a diagnosis and a fix, record them together with `memory_add_batch` using `$prev` or `$0`.
    - **Step 5 — Write, then report**: call `memory_add` (or `memory_add_batch`) before you present your final summary, and mention the recorded node ID(s) in that summary. Every entry needs a specific `title` (see Writing Titles above) — it is what makes the memory findable later.
+   - **Step 6 — Refresh the file rows you touched**: for every file you created, moved or materially changed, refresh its table row (`project_files_update` with those paths, or `project_gist` for one) so the recorded line count and description still match the file. This is part of finishing the task, not optional cleanup.
    - **Only these are exempt**: changes with no behavioural effect on the project — pure formatting, comment or typo fixes, and throwaway experiments you reverted. `tags`, `scope`, and `impact` remain mandatory on every entry you do write.
    - **When in doubt, write it**: a slightly redundant memory is cheap; a lost root cause, rejected alternative, or rationale is expensive. If you skip, you must be able to name which exemption above applies.
 """

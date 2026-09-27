@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
+from support import workspace_tempdir
 import pytest
 from typer.testing import CliRunner
 
@@ -17,7 +17,7 @@ from src.core.agent_rules import AGENT_RULE_CONTENT
 
 @pytest.fixture
 def storage():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / ".tacit" / "memory.db"
         s = MemoryStorage(db_path)
         yield s

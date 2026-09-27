@@ -1,6 +1,6 @@
 """Unit tests for Search components (FullTextSearch, TemporalSearch, BloomFilter)."""
 
-import tempfile
+from support import workspace_tempdir
 from pathlib import Path
 import pytest
 from datetime import datetime, timezone
@@ -14,7 +14,7 @@ from src.search.bloom_filter import BloomFilter
 
 @pytest.fixture
 def search_fixture():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / "search_test.db"
         storage = MemoryStorage(db_path)
         fts = FullTextSearch(storage)

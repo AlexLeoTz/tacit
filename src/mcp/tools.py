@@ -276,6 +276,91 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "memory_link",
+        "description": "Connect two memory nodes in the causal DAG (relation: 'derives_from', 'supersedes', or 'related'). Use it when a memory was recorded as an orphan, or when a diagnosis resolves a specific earlier error.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "child_id": {
+                    "type": "string",
+                    "description": "Complete UUID of the child (the newer / deriving memory).",
+                },
+                "parent_id": {
+                    "type": "string",
+                    "description": "Complete UUID of the parent (the memory it derives from, supersedes, or relates to).",
+                },
+                "relation": {
+                    "type": "string",
+                    "enum": ["derives_from", "supersedes", "related"],
+                    "default": "derives_from",
+                    "description": "Edge type to create.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Why the edge exists; stored with it and shown in lineage output.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace both nodes live in: absolute project root path or registered name.",
+                },
+            },
+            "required": ["child_id", "parent_id"],
+        },
+    },
+    {
+        "name": "memory_chronicle",
+        "description": "Return the project's ENTIRE memory history in chronological order (oldest first), for deep analysis of how the project got here. Nothing is ranked, budgeted or deduped, and superseded decisions are included. Use brief=true for a one-line-per-memory timeline and limit=0 for everything.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_hint": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional. Project-relative paths to filter the timeline by (project-wide memories always included).",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": MEMORY_TYPES,
+                    "description": "Only include this memory category.",
+                },
+                "timeframe": {
+                    "type": "string",
+                    "default": "all",
+                    "description": "Only include memories from this window: 'all', 'week', '30d', '6h', 'year', or an ISO date.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Maximum memories to render; 0 means the entire history.",
+                },
+                "brief": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "One line per memory instead of full content.",
+                },
+                "include_superseded": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include memories that were later superseded (default true: they are part of the reasoning history).",
+                },
+                "include_retracted": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Also include memories that were retracted as wrong.",
+                },
+                "content_chars": {
+                    "type": "integer",
+                    "default": 4000,
+                    "description": "Elide each memory's content beyond this many characters; 0 never elides.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to read: absolute project root path or registered name.",
+                },
+            },
+        },
+    },
+    {
         "name": "memory_projects",
         "description": "List all discovered and registered project memory workspaces and their memory counts on this machine.",
         "inputSchema": {
@@ -316,23 +401,78 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "project_files_pending",
+        "description": "List the files whose table row is missing or stale, with line counts, sizes and languages already computed. Write the descriptions it asks for in ONE project_files_update call (many entries at once) rather than one call per file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "default": 25,
+                    "description": "Maximum number of files to list.",
+                },
+                "include_facts": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include the computed line count, size and language per file.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to read: absolute project root path or registered name.",
+                },
+            },
+        },
+    },
+    {
+        "name": "project_files_update",
+        "description": "Write many file-table rows in one call: each entry is {'path': 'backend/app/Payment.php', 'description': 'contains the payment logic: gateway calls, refunds, receipts'}. Tacit records line count, size, content hash, author and timestamp itself. A missing path is rejected per entry without losing the rest of the batch.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "description": {"type": "string"},
+                            "by": {"type": "string"},
+                        },
+                        "required": ["path"],
+                    },
+                    "description": "Rows to write; each needs a project-relative path and a compact description.",
+                },
+                "by": {
+                    "type": "string",
+                    "default": "ai-agent",
+                    "description": "Who is writing these rows; recorded per row.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Workspace to write to: absolute project root path or registered name.",
+                },
+            },
+            "required": ["entries"],
+        },
+    },
+    {
         "name": "project_gist",
-        "description": "Record a one-line gist of what a file contains, keyed by project-relative path. It is shown beside that file in project_structure, so the next session does not have to open the file to know its role. Pass an empty gist to remove it.",
+        "description": "Record a file-table row for ONE file: a one-line description of what it contains, shown beside that file in project_structure. Pass an empty gist to clear it. For many files, use project_files_pending + project_files_update.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Project-relative path of the file the gist describes (e.g. 'backend/app/Models/Film.php'). Must exist.",
+                    "description": "Project-relative path of the file the description is about (e.g. 'backend/app/Models/Film.php'). Must exist.",
                 },
                 "gist": {
                     "type": "string",
-                    "description": "One informative sentence about the file's contents or role. Empty removes the gist.",
+                    "description": "One informative sentence about the file's contents or role. Empty clears it.",
                 },
                 "author": {
                     "type": "string",
                     "default": "ai-agent",
-                    "description": "Who recorded the gist.",
+                    "description": "Who recorded it; stored on the row with the timestamp.",
                 },
                 "project": {
                     "type": "string",

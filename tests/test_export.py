@@ -1,6 +1,6 @@
 """Unit tests for MarkdownExporter and ExportSummary generation."""
 
-import tempfile
+from support import workspace_tempdir
 from pathlib import Path
 import pytest
 
@@ -10,7 +10,7 @@ from src.export.markdown_exporter import MarkdownExporter
 
 
 def test_markdown_exporter_creates_files():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / "export_test.db"
         export_out = Path(tmpdir) / "output"
 

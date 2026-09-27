@@ -19,6 +19,7 @@ nothing extra appears in the repository.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -53,6 +54,8 @@ CONFIG_SECTION = "project_tree"
 CONFIG_FILE = "config.json"
 SNAPSHOT_FILE = "project-tree.json"
 GISTS_FILE = "gists.json"
+#: v2: one metadata row per file (see the file-table section below).
+FILE_TABLE_FILE = "file-table.json"
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +271,401 @@ def refresh_snapshot(root: str | Path, store_dir: str | Path) -> Dict[str, Any]:
     return snapshot
 
 
+# ---------------------------------------------------------------------------
+# The file table: one row of metadata per file
+#
+# A structure map tells a session where things are. The file table adds what a
+# session cannot get without opening the file: how big it is in lines and what
+# lives inside it. The mechanical half (lines, bytes, language, hash, size) is
+# computed here; the description is written by an agent, because only a reader
+# can say "contains the payment logic". Every row records who wrote it and when,
+# and staleness is detected by comparing the stored hash/size with the file on
+# disk — so a stale row is a fact, not a guess.
+# ---------------------------------------------------------------------------
+
+#: Content read when hashing. Larger files are hashed on their first chunk only,
+#: and marked, because a full read of a huge asset is not worth the seconds.
+HASH_CHUNK_LIMIT = 2 * 1024 * 1024
+TRUNCATED_HASH_SUFFIX = ":partial"
+
+#: Extension -> language label, for the (common) cases where it is not obvious.
+LANGUAGE_BY_SUFFIX = {
+    ".py": "Python", ".pyi": "Python",
+    ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
+    ".ts": "TypeScript", ".tsx": "TypeScript", ".jsx": "JavaScript",
+    ".php": "PHP", ".rb": "Ruby", ".go": "Go", ".rs": "Rust",
+    ".java": "Java", ".kt": "Kotlin", ".swift": "Swift", ".cs": "C#",
+    ".c": "C", ".h": "C", ".cc": "C++", ".cpp": "C++", ".hpp": "C++",
+    ".sh": "Shell", ".ps1": "PowerShell", ".bat": "Batch",
+    ".sql": "SQL", ".html": "HTML", ".css": "CSS", ".scss": "SCSS",
+    ".vue": "Vue", ".svelte": "Svelte", ".blade.php": "Blade",
+    ".json": "JSON", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML",
+    ".md": "Markdown", ".rst": "reStructuredText", ".txt": "Text",
+    ".tf": "Terraform", ".dockerfile": "Dockerfile", ".ini": "INI",
+}
+
+#: Files that are never worth counting lines in.
+BINARY_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svgz", ".bmp",
+    ".pdf", ".zip", ".gz", ".tar", ".tgz", ".7z", ".rar", ".jar", ".war",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3", ".mp4", ".mov",
+    ".webm", ".wav", ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".sqlite",
+    ".db", ".exe", ".dll", ".so", ".dylib", ".bin", ".pyc", ".class",
+)
+
+MAX_DESCRIPTION_CHARS = 400
+
+
+def normalise_rel_path(value: Any) -> str:
+    """Normalise a caller-supplied project-relative path.
+
+    Only a leading ``./`` is stripped. ``lstrip("./")`` — the obvious-looking
+    one-liner — eats the dot of every dotfile, turning ``.env`` into ``env`` and
+    keying the row to the wrong filename.
+    """
+    text = str(value or "").replace("\\", "/").strip()
+    while text.startswith("./"):
+        text = text[2:]
+    return text.strip("/")
+
+
+def file_language(rel_path: str) -> str:
+    """Best-effort language label from a file name."""
+    name = str(rel_path).lower()
+    lowered = name.rsplit("/", 1)[-1]
+    if lowered in {"dockerfile", "makefile", "procfile", "rakefile", "gemfile"}:
+        return lowered.capitalize()
+    for suffix, language in LANGUAGE_BY_SUFFIX.items():
+        if name.endswith(suffix):
+            return language
+    return ""
+
+
+def is_probably_binary(rel_path: str) -> bool:
+    return str(rel_path).lower().endswith(BINARY_SUFFIXES)
+
+
+def file_facts(root: str | Path, rel_path: str) -> Dict[str, Any]:
+    """Mechanical facts about one file: lines, bytes, language, hash, mtime."""
+    target = Path(root) / str(rel_path).replace("\\", "/")
+    facts: Dict[str, Any] = {
+        "lines": 0,
+        "bytes": 0,
+        "language": file_language(rel_path),
+        "binary": is_probably_binary(rel_path),
+        "hash": "",
+        "size": 0,
+        "mtime": 0.0,
+    }
+    try:
+        stat = target.stat()
+    except OSError:
+        return facts
+
+    facts["size"] = int(stat.st_size)
+    facts["mtime"] = float(stat.st_mtime)
+
+    if not facts["binary"]:
+        try:
+            data = target.read_bytes()
+        except OSError:
+            data = b""
+        facts["bytes"] = len(data) if data else int(stat.st_size)
+        if data:
+            # Counting the newlines of a real text file is exact and cheap.
+            facts["lines"] = data.count(b"\n") + (0 if data.endswith(b"\n") else 1)
+
+    digest = hashlib.sha256()
+    fact_bytes = 0
+    try:
+        with target.open("rb") as handle:
+            while True:
+                chunk = handle.read(256 * 1024)
+                if not chunk:
+                    break
+                if fact_bytes + len(chunk) > HASH_CHUNK_LIMIT:
+                    digest.update(chunk[: max(0, HASH_CHUNK_LIMIT - fact_bytes)])
+                    facts["hash"] = digest.hexdigest() + TRUNCATED_HASH_SUFFIX
+                    return facts
+                digest.update(chunk)
+                fact_bytes += len(chunk)
+    except OSError:
+        return facts
+    facts["hash"] = digest.hexdigest()
+    return facts
+
+
+def file_table_path(store_dir: str | Path) -> Path:
+    return Path(store_dir) / FILE_TABLE_FILE
+
+
+def load_file_table(store_dir: str | Path) -> Dict[str, Dict[str, Any]]:
+    """Read the file table, migrating a legacy ``gists.json`` on first use."""
+    path = file_table_path(store_dir)
+    if not path.exists():
+        migrated = _migrate_gists(store_dir)
+        if migrated:
+            return migrated
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rows = data.get("files") if isinstance(data, dict) and "files" in data else data
+        return rows if isinstance(rows, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_file_table(store_dir: str | Path, rows: Dict[str, Dict[str, Any]]) -> Path:
+    path = file_table_path(store_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 2, "files": rows}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _migrate_gists(store_dir: str | Path) -> Dict[str, Dict[str, Any]]:
+    """Fold a v1 ``gists.json`` into the file table, preserving who and when."""
+    legacy = gists_path(store_dir)
+    if not legacy.exists():
+        return {}
+    try:
+        old = json.loads(legacy.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(old, dict) or not old:
+        return {}
+    rows: Dict[str, Dict[str, Any]] = {}
+    for key, value in old.items():
+        if not isinstance(value, dict):
+            continue
+        rows[str(key).replace("\\", "/")] = {
+            "description": str(value.get("gist") or "")[:MAX_DESCRIPTION_CHARS],
+            "updated_at": float(value.get("updated_at") or 0) or time.time(),
+            "by": str(value.get("by") or "unknown"),
+            "migrated_from": "gists.json",
+        }
+    if rows:
+        save_file_table(store_dir, rows)
+    return rows
+
+
+def set_file_row(
+    root: str | Path,
+    store_dir: str | Path,
+    rel_path: str,
+    description: Optional[str] = None,
+    by: str = "ai-agent",
+    refresh_facts: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Write or update one row, recomputing its mechanical facts from disk.
+
+    Only the fields the caller actually changes are touched: passing no
+    ``description`` keeps the existing one, which is how ``tacit files --refresh``
+    updates line counts without discarding what an agent learned.
+    """
+    key = normalise_rel_path(rel_path)
+    if not key:
+        return None
+
+    rows = load_file_table(store_dir)
+    row = dict(rows.get(key) or {})
+    row.setdefault("description", "")
+    row["path"] = key
+    row["language"] = row.get("language") or file_language(key)
+
+    if refresh_facts:
+        facts = file_facts(root, key)
+        row.update(facts)
+        row["analyzed_at"] = time.time()
+
+    if description is not None:
+        row["description"] = str(description).strip()[:MAX_DESCRIPTION_CHARS]
+        row["updated_at"] = time.time()
+        row["by"] = str(by or "unknown")
+
+    rows[key] = row
+    save_file_table(store_dir, rows)
+    return row
+
+
+def update_file_rows(
+    root: str | Path,
+    store_dir: str | Path,
+    entries: Iterable[Dict[str, Any]],
+    by: str = "ai-agent",
+    refresh_facts: bool = True,
+) -> Dict[str, Any]:
+    """Write many rows in one pass — how an agent fills the table in parallel.
+
+    Each entry is ``{"path": ..., "description": ...}``. Bad paths are reported
+    per entry instead of failing the batch, so one typo cannot waste the work of
+    the other nineteen descriptions.
+    """
+    rows = load_file_table(store_dir)
+    written: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    for entry in entries or []:
+        raw = normalise_rel_path((entry or {}).get("path"))
+        if not raw:
+            errors.append({"path": "", "error": "missing path"})
+            continue
+        target = Path(root) / raw
+        if not target.exists():
+            errors.append({"path": raw, "error": "no such file or directory"})
+            continue
+
+        row = dict(rows.get(raw) or {})
+        row.setdefault("description", "")
+        row["path"] = raw
+        row["language"] = row.get("language") or file_language(raw)
+        if refresh_facts:
+            row.update(file_facts(root, raw))
+            row["analyzed_at"] = time.time()
+        description = (entry or {}).get("description")
+        if description is not None:
+            row["description"] = str(description).strip()[:MAX_DESCRIPTION_CHARS]
+            row["updated_at"] = time.time()
+            row["by"] = str((entry or {}).get("by") or by or "unknown")
+        rows[raw] = row
+        written.append(row)
+
+    save_file_table(store_dir, rows)
+    return {"written": written, "errors": errors, "count": len(written)}
+
+
+def snapshot_files(snapshot: Optional[Dict[str, Any]]) -> List[str]:
+    """Every file path in a snapshot, in map order."""
+    found: List[str] = []
+
+    def walk(nodes: Sequence[Dict[str, Any]], rel: str) -> None:
+        for node in nodes:
+            name = str(node.get("name", ""))
+            node_rel = f"{rel}/{name}" if rel else name
+            if node.get("type") == "dir":
+                walk(node.get("children") or [], node_rel)
+            else:
+                found.append(node_rel)
+
+    walk((snapshot or {}).get("children") or [], "")
+    return found
+
+
+def pending_files(
+    root: str | Path,
+    store_dir: str | Path,
+    limit: int = 25,
+    include_facts: bool = True,
+) -> Dict[str, Any]:
+    """Files whose row is missing or stale, with the facts already computed.
+
+    Stale means the file's content hash or size no longer matches the row — a
+    rename is covered too, because the snapshot is rebuilt first when it is old.
+    The caller only has to supply a description.
+    """
+    snapshot = load_snapshot(store_dir)
+    if not snapshot:
+        snapshot = refresh_snapshot(root, store_dir)
+
+    paths = snapshot_files(snapshot)
+    rows = load_file_table(store_dir)
+    pending: List[Dict[str, Any]] = []
+
+    for rel in paths:
+        row = rows.get(rel) or {}
+        facts = file_facts(root, rel) if include_facts else {}
+        reasons: List[str] = []
+        if not row:
+            reasons.append("no row yet")
+        else:
+            if not str(row.get("description") or "").strip():
+                reasons.append("no description")
+            stored_hash = str(row.get("hash") or "")
+            if stored_hash and facts and stored_hash != facts.get("hash"):
+                reasons.append("content changed")
+            if row.get("size") is not None and facts and int(row.get("size") or 0) != int(facts.get("size") or 0):
+                if "content changed" not in reasons:
+                    reasons.append("size changed")
+        if reasons:
+            entry: Dict[str, Any] = {"path": rel, "reasons": reasons}
+            if include_facts:
+                entry.update(
+                    {
+                        "lines": facts.get("lines", 0),
+                        "bytes": facts.get("bytes", 0),
+                        "language": facts.get("language", ""),
+                        "binary": facts.get("binary", False),
+                        "hash": facts.get("hash", ""),
+                        "size": facts.get("size", 0),
+                    }
+                )
+                if row.get("description"):
+                    entry["current_description"] = row.get("description")
+            pending.append(entry)
+
+    pending.sort(key=lambda item: (-int(item.get("lines") or 0), item["path"]))
+    selected = pending[: max(1, int(limit))] if limit else pending
+    return {
+        "total_pending": len(pending),
+        "returned": len(selected),
+        "total_files": len(paths),
+        "described": sum(1 for rel in paths if (rows.get(rel) or {}).get("description")),
+        "files": selected,
+    }
+
+
+def file_table_stats(root: str | Path, store_dir: str | Path) -> Dict[str, Any]:
+    """Totals for the project's file table."""
+    snapshot = load_snapshot(store_dir)
+    paths = snapshot_files(snapshot) if snapshot else snapshot_files(refresh_snapshot(root, store_dir))
+    rows = load_file_table(store_dir)
+
+    total_lines = 0
+    described = 0
+    stale = 0
+    languages: Dict[str, int] = {}
+    for rel in paths:
+        row = rows.get(rel) or {}
+        total_lines += int(row.get("lines") or 0)
+        if str(row.get("description") or "").strip():
+            described += 1
+        language = str(row.get("language") or file_language(rel) or "other")
+        languages[language] = languages.get(language, 0) + 1
+        facts = file_facts(root, rel)
+        if row and (str(row.get("hash") or "") != str(facts.get("hash") or "")):
+            stale += 1
+
+    return {
+        "files": len(paths),
+        "rows": sum(1 for rel in paths if rel in rows),
+        "described": described,
+        "undescribed": len(paths) - described,
+        "stale": stale,
+        "total_lines": total_lines,
+        "languages": dict(sorted(languages.items(), key=lambda item: -item[1])),
+    }
+
+
+def prune_file_table(root: str | Path, store_dir: str | Path) -> List[str]:
+    """Drop rows whose file no longer exists; returns the removed paths."""
+    rows = load_file_table(store_dir)
+    removed = [key for key in rows if not (Path(root) / key).exists()]
+    if removed:
+        for key in removed:
+            rows.pop(key, None)
+        save_file_table(store_dir, rows)
+    return removed
+
+
+def format_lines(lines: int) -> str:
+    """Compact line count: 942 -> '942', 12400 -> '12.4k', 1200000 -> '1.2M'."""
+    count = int(lines or 0)
+    if count < 1000:
+        return str(count)
+    if count < 1_000_000:
+        return f"{count / 1000:.1f}k"
+    return f"{count / 1_000_000:.1f}M"
+
+
 def snapshot_summary(store_dir: str | Path) -> Optional[str]:
     """One line describing the stored map, or ``None`` when there is none."""
     snapshot = load_snapshot(store_dir)
@@ -295,7 +693,10 @@ def _human_age(seconds: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Gists: what a file actually contains, in one line
+# Gists: the v1 name for a file row's description
+#
+# Kept as a thin compatibility layer over the file table so older callers (and
+# any `gists.json` already on disk) keep working.
 # ---------------------------------------------------------------------------
 
 def gists_path(store_dir: str | Path) -> Path:
@@ -303,11 +704,18 @@ def gists_path(store_dir: str | Path) -> Path:
 
 
 def load_gists(store_dir: str | Path) -> Dict[str, Dict[str, Any]]:
-    try:
-        data = json.loads(gists_path(store_dir).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """The described rows, in the v1 ``gists.json`` shape."""
+    view: Dict[str, Dict[str, Any]] = {}
+    for key, row in load_file_table(store_dir).items():
+        description = str(row.get("description") or "").strip()
+        if not description:
+            continue
+        view[key] = {
+            "gist": description,
+            "updated_at": row.get("updated_at") or 0,
+            "by": row.get("by") or "unknown",
+        }
+    return view
 
 
 def set_gist(
@@ -316,34 +724,47 @@ def set_gist(
     gist: str,
     author: str = "ai-agent",
 ) -> Optional[Dict[str, Any]]:
-    """Store (or clear, with an empty gist) the note for one file."""
-    key = str(rel_path).replace("\\", "/").strip().lstrip("./")
+    """Store (or clear, with an empty gist) the description for one file.
+
+    No filesystem facts are computed here because no project root is known; use
+    :func:`set_file_row` when the root is available, which also records lines,
+    size and content hash.
+    """
+    key = normalise_rel_path(rel_path)
     if not key:
         return None
-    gists = load_gists(store_dir)
-    if not gist.strip():
-        gists.pop(key, None)
+    rows = load_file_table(store_dir)
+    row = dict(rows.get(key) or {})
+    row.setdefault("description", "")
+    row["path"] = key
+    row["language"] = row.get("language") or file_language(key)
+
+    text = str(gist or "").strip()
+    if not text:
+        row["description"] = ""
+        if not any(value for field, value in row.items() if field not in {"path", "description", "language"}):
+            # Nothing left worth keeping: drop the row entirely.
+            rows.pop(key, None)
+            save_file_table(store_dir, rows)
+            return None
     else:
-        gists[key] = {
-            "gist": gist.strip()[:MAX_GIST_CHARS],
-            "updated_at": time.time(),
-            "by": author,
-        }
-    path = gists_path(store_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(gists, indent=2), encoding="utf-8")
-    return gists.get(key)
+        row["description"] = text[:MAX_DESCRIPTION_CHARS]
+        row["updated_at"] = time.time()
+        row["by"] = str(author or "unknown")
+    rows[key] = row
+    save_file_table(store_dir, rows)
+    return row
 
 
 def prune_gists(store_dir: str | Path, existing_paths: Iterable[str]) -> List[str]:
-    """Drop gists whose file no longer exists; returns the removed keys."""
+    """Drop rows whose file no longer exists; returns the removed keys."""
     keep = {str(path).replace("\\", "/") for path in existing_paths}
-    gists = load_gists(store_dir)
-    removed = [key for key in gists if key not in keep]
+    rows = load_file_table(store_dir)
+    removed = [key for key in rows if key not in keep]
     if removed:
         for key in removed:
-            gists.pop(key, None)
-        gists_path(store_dir).write_text(json.dumps(gists, indent=2), encoding="utf-8")
+            rows.pop(key, None)
+        save_file_table(store_dir, rows)
     return removed
 
 
@@ -351,22 +772,27 @@ def prune_gists(store_dir: str | Path, existing_paths: Iterable[str]) -> List[st
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _gist_for(rel_path: str, gists: Dict[str, Dict[str, Any]]) -> str:
-    entry = gists.get(rel_path) or {}
-    text = str(entry.get("gist") or "").strip()
-    if not text:
-        return ""
-    return text.replace("\n", " ")
+def _row_annotation(rel_path: str, rows: Dict[str, Dict[str, Any]], include_lines: bool) -> str:
+    """``(12.4k LOC) # description`` for one file, or ``""``."""
+    row = rows.get(rel_path) or {}
+    parts: List[str] = []
+    if include_lines and row.get("lines"):
+        parts.append(f"({format_lines(int(row['lines']))} LOC)")
+    description = str(row.get("description") or "").strip().replace("\n", " ")
+    if description:
+        parts.append(f"# {description}")
+    return ("   " + " ".join(parts)) if parts else ""
 
 
 def render_tree(
     snapshot: Dict[str, Any],
-    gists: Optional[Dict[str, Dict[str, Any]]] = None,
+    rows: Optional[Dict[str, Dict[str, Any]]] = None,
     path_prefix: str = "",
     max_lines: int = 400,
+    include_lines: bool = True,
 ) -> str:
-    """Render a snapshot as an indented outline, optionally gist-annotated."""
-    gists = gists or {}
+    """Render a snapshot as an indented outline, annotated from the file table."""
+    rows = rows or {}
     prefix = path_prefix.replace("\\", "/").strip("/")
     lines: List[str] = []
 
@@ -381,9 +807,7 @@ def render_tree(
                 lines.append(f"{'  ' * depth}- {name}/{marker}")
                 walk(node.get("children") or [], depth + 1, node_rel)
             else:
-                annotation = _gist_for(node_rel, gists)
-                suffix = f"   # {annotation}" if annotation else ""
-                lines.append(f"{'  ' * depth}- {name}{suffix}")
+                lines.append(f"{'  ' * depth}- {name}{_row_annotation(node_rel, rows, include_lines)}")
 
     def find(nodes: Sequence[Dict[str, Any]], rel: str) -> Optional[List[Dict[str, Any]]]:
         if not rel:
@@ -431,8 +855,11 @@ def render_stored(
             "or `tacit structure --refresh`."
         )
     settings = tree_settings(store_dir)
-    gists = load_gists(store_dir) if (include_gists and settings.get("gists", True)) else {}
-    body = render_tree(snapshot, gists=gists, path_prefix=path_prefix, max_lines=max_lines)
+    rows = load_file_table(store_dir) if (include_gists and settings.get("gists", True)) else {}
+    body = render_tree(snapshot, rows=rows, path_prefix=path_prefix, max_lines=max_lines)
     summary = snapshot_summary(store_dir) or ""
-    legend = "\n(* = git repository; `#` = stored file gist)" if gists else "\n(* = git repository)"
+    legend = "\n(* = git repository; `(n LOC)` = lines of code; `#` = stored description)"
+    described = sum(1 for row in rows.values() if str(row.get("description") or "").strip())
+    if rows:
+        legend += f"\n({described}/{len(rows)} rows described · `tacit files --pending` lists the rest)"
     return f"{body}{legend}\n({summary})"

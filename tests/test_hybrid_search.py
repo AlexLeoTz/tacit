@@ -2,7 +2,7 @@
 
 import math
 from pathlib import Path
-import tempfile
+from support import workspace_tempdir
 import pytest
 
 from src.core.memory_node import MemoryNode
@@ -14,7 +14,7 @@ from src.search.hybrid import clean_query, rrf, build_embed_text
 
 @pytest.fixture
 def temp_storage():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / ".tacit" / "memory.db"
         storage = MemoryStorage(db_path)
         yield storage
@@ -121,7 +121,13 @@ def test_hybrid_search_end_to_end(temp_storage):
     assert res_scoped[0]["node"].id == "auth_jwt_node"
 
 
-def test_reindex_all_backfill(temp_storage):
+def test_reindex_all_backfill(temp_storage, monkeypatch):
+    """Backfill is driven by a stub provider, so the test is machine-independent.
+
+    `reindex_all` returns `(0, 0)` when no embedding backend is available, which
+    made this test pass only on a machine that happened to have one (an API key or
+    a downloaded ONNX model). That is not a property of the code under test.
+    """
     # Add memory with embedding intentionally cleared
     node = MemoryNode(
         id="unindexed_node",
@@ -139,6 +145,12 @@ def test_reindex_all_backfill(temp_storage):
     conn.execute("UPDATE memories SET embedding = NULL, embedded_at = NULL WHERE id = 'unindexed_node'")
     conn.commit()
     conn.close()
+
+    service = EmbeddingService.get()
+    monkeypatch.setattr(EmbeddingService, "available", property(lambda self: True))
+    monkeypatch.setattr(
+        service, "embed_documents", lambda texts: [[0.25] * 8 for _ in texts], raising=False
+    )
 
     done, total = temp_storage.reindex_all(progress=False)
     assert total >= 1

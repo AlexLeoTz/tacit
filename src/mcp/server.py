@@ -207,6 +207,7 @@ def create_mcp_server(
         parent_id: str,
         relation: str = "derives_from",
         reason: Optional[str] = None,
+        project: Optional[str] = None,
     ) -> str:
         """Connect two memory nodes in the causal DAG (relation: 'derives_from', 'supersedes', or 'related').
         
@@ -217,8 +218,43 @@ def create_mcp_server(
             parent_id=parent_id,
             relation=relation,
             reason=reason,
+            project=project,
         )
-        return res.get("message") or json.dumps(res, indent=2)
+        return res.get("message") or res.get("formatted") or json.dumps(res, indent=2)
+
+    @mcp.tool(description=(
+        "Return the project's ENTIRE memory history in chronological order "
+        "(oldest first), for deep analysis of how the project got here. The "
+        "deliberate opposite of memory_context: nothing is ranked, budgeted or "
+        "deduped, and superseded decisions are included because a replaced "
+        "decision is part of the reasoning history. Use `brief=true` for a "
+        "one-line-per-memory timeline, `limit=0` for everything, and "
+        "`type`/`timeframe`/`scope_hint` to narrow it."
+    ))
+    def memory_chronicle(
+        scope_hint: Optional[List[str]] = None,
+        type: Optional[str] = None,
+        timeframe: str = "all",
+        limit: int = 100,
+        brief: bool = False,
+        include_superseded: bool = True,
+        include_retracted: bool = False,
+        content_chars: int = 4000,
+        project: Optional[str] = None,
+    ) -> str:
+        """Print every memory in chronological order, oldest first."""
+        res = handlers.handle_memory_chronicle(
+            scope_hint=scope_hint,
+            type=type,
+            timeframe=timeframe,
+            limit=limit,
+            brief=brief,
+            include_superseded=include_superseded,
+            include_retracted=include_retracted,
+            content_chars=content_chars,
+            project=project,
+        )
+        return res.get("formatted") or res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool()
     def memory_projects() -> str:
@@ -252,12 +288,11 @@ def create_mcp_server(
         return res.get("formatted") or res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool(description=(
-        "Record a one-line gist of what a file contains, keyed by "
-        "project-relative path (e.g. 'backend/app/Models/Film.php'). It is shown "
-        "beside that file in `project_structure`, so the next session does not "
-        "have to open the file to know its role. Pass an empty `gist` to remove "
-        "it. Keep it to one informative sentence: a gist is a map label, not a "
-        "summary of the whole subsystem."
+        "Record a file-table row for ONE file: a one-line description of what it "
+        "contains is shown beside that file in `project_structure`. Pass an empty "
+        "`gist` to clear the description. To fill many files at once, use "
+        "`project_files_pending` + `project_files_update` instead — this tool is "
+        "for a single file you have just changed or understood."
     ))
     def project_gist(
         path: str,
@@ -265,11 +300,48 @@ def create_mcp_server(
         author: str = "ai-agent",
         project: Optional[str] = None,
     ) -> str:
-        """Attach a one-line description of a file's contents."""
+        """Attach a one-line description of a file's contents (a file-table row)."""
         res = handlers.handle_project_gist(
             path=path, gist=gist, author=author, project=project
         )
         return res.get("message") or res.get("formatted") or json.dumps(res, indent=2)
+
+    @mcp.tool(description=(
+        "List the files whose table row is missing or stale, with line counts, "
+        "sizes and languages already computed by Tacit. Call this to keep the "
+        "project's file table current: write the descriptions it asks for in ONE "
+        "project_files_update call (many entries at once) rather than one call per "
+        "file. Nothing to do when it reports the table is current."
+    ))
+    def project_files_pending(
+        limit: int = 25,
+        include_facts: bool = True,
+        project: Optional[str] = None,
+    ) -> str:
+        """Files whose table row needs writing or refreshing."""
+        res = handlers.handle_project_files_pending(
+            limit=limit, include_facts=include_facts, project=project
+        )
+        return res.get("formatted") or res.get("message") or json.dumps(res, indent=2)
+
+    @mcp.tool(description=(
+        "Write many file-table rows in one call: each entry is "
+        "{'path': 'backend/app/Payment.php', 'description': 'contains the payment "
+        "logic: gateway calls, refunds, receipts'}. Use it to fill the files listed "
+        "by project_files_pending in parallel batches, and after editing a file to "
+        "refresh its row. Tacit records the line count, size, content hash, the "
+        "author and the timestamp itself; the description is one compact sentence "
+        "about what lives in the file. A missing path is rejected per entry without "
+        "losing the rest of the batch."
+    ))
+    def project_files_update(
+        entries: List[Dict[str, Any]],
+        by: str = "ai-agent",
+        project: Optional[str] = None,
+    ) -> str:
+        """Record descriptions for several files at once."""
+        res = handlers.handle_project_files_update(entries=entries, by=by, project=project)
+        return res.get("formatted") or res.get("message") or json.dumps(res, indent=2)
 
     @mcp.tool(description=(
         "Pin or unpin memories so they always appear at the end of memory_context "

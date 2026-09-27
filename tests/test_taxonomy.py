@@ -99,6 +99,48 @@ def test_mcp_server_description_advertises_every_category():
         assert name in _ADD_MEMORY_DESCRIPTION
 
 
+def _live_tool_names(source: str):
+    """Tool function names decorated with `@mcp.tool` in a module's source.
+
+    The decorator's description argument can span several lines, so this walks the
+    source looking for the first `def` after each `@mcp.tool` line rather than
+    trying to match the decorator with one regular expression.
+    """
+    names = set()
+    pending = False
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("@mcp.tool"):
+            pending = True
+            continue
+        if pending:
+            match = re.match(r"\s*def (\w+)\(", line)
+            if match:
+                names.add(match.group(1))
+                pending = False
+    return names
+
+
+def test_published_schemas_and_the_live_server_expose_the_same_tools():
+    """`tools.py` is hand-written documentation; `server.py` is the real surface.
+
+    Adding a tool to one and forgetting the other is the easiest drift in this
+    codebase, and it is invisible at runtime: the model simply never learns the
+    tool exists, or reads a schema for something that is not implemented.
+    """
+    import inspect
+
+    from src.mcp import server as server_module
+
+    live = _live_tool_names(inspect.getsource(server_module))
+    published = {tool["name"] for tool in TOOL_DEFINITIONS}
+
+    assert live == published, (
+        f"only in server.py: {sorted(live - published)}; "
+        f"only in tools.py: {sorted(published - live)}"
+    )
+
+
 def test_dashboard_lists_every_category_in_both_dropdowns():
     for name in Config.MEMORY_TYPES:
         assert HTML_PREVIEW_TEMPLATE.count(f'<option value="{name}">') == 2

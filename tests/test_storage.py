@@ -1,6 +1,6 @@
 """Unit tests for SQLite storage layer and FTS5 search."""
 
-import tempfile
+from support import workspace_tempdir
 from pathlib import Path
 import pytest
 
@@ -10,7 +10,7 @@ from src.core.storage import MemoryStorage
 
 @pytest.fixture
 def temp_storage():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with workspace_tempdir() as tmpdir:
         db_path = Path(tmpdir) / "test_memory.db"
         storage = MemoryStorage(db_path)
         yield storage

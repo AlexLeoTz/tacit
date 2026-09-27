@@ -18,9 +18,10 @@ from rich.table import Table
 import typer
 
 from .. import __version__
+from ..core import chronicle as chronicle_engine
 from ..core.agent_rules import AGENT_RULE_CONTENT
 from ..core.memory_node import MemoryNode
-from ..core.storage import MemoryStorage
+from ..core.storage import MemoryStorage, count_memories_readonly
 from ..export.markdown_exporter import MarkdownExporter
 from ..export.preview_server import MarkdownPreviewServer
 from ..mcp.server import MemoryMCPServer
@@ -51,6 +52,22 @@ def _make_output_encoding_safe() -> None:
             reconfigure(errors="replace")
         except (ValueError, OSError):
             pass
+
+
+def _print_json(payload: object) -> None:
+    """Write JSON to stdout without Rich's line wrapping.
+
+    Rich wraps at the console width, which silently inserts newlines *inside*
+    JSON strings and produces output that no longer parses. Machine-readable
+    modes must be byte-honest, so they bypass the console entirely.
+    """
+    text = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    stream = getattr(console, "file", None) or sys.stdout
+    stream.write(text + "\n")
+    try:
+        stream.flush()
+    except (ValueError, OSError):
+        pass
 
 
 def _esc(value: object) -> str:
@@ -1321,13 +1338,9 @@ def projects():
     for name, path_str in sorted(registered.items()):
         root = Path(path_str)
         db_path = Config.get_db_path(root)
-        count = 0
-        if db_path.exists():
-            try:
-                s = MemoryStorage(db_path)
-                count = s.get_count()
-            except Exception:
-                count = 0
+        # Read-only: a listing must not migrate (or even touch) the stores it
+        # reports on, and it must not pay a schema bootstrap for each of them.
+        count = count_memories_readonly(db_path)
         is_active = root == current_root
         table.add_row(
             name,
@@ -1548,7 +1561,7 @@ def structure(
         if snapshot is None:
             console.print("[yellow]No snapshot yet. Run with --refresh.[/yellow]")
             raise typer.Exit(code=1)
-        console.print(json.dumps(snapshot, indent=2), markup=False)
+        _print_json(snapshot)
         return
 
     console.print(
@@ -1561,6 +1574,207 @@ def structure(
         ),
         markup=False,
     )
+
+
+@app.command()
+def files(
+    pending: bool = typer.Option(
+        False,
+        "--pending",
+        help="List files whose table row is missing or stale, with line counts precomputed",
+    ),
+    limit: int = typer.Option(25, "--limit", "-n", help="Maximum rows to list or write"),
+    set_path: Optional[str] = typer.Option(
+        None, "--set", help="Project-relative path of a single file to describe"
+    ),
+    description: str = typer.Option(
+        "", "--description", "-m", help="Description to store with --set (empty clears it)"
+    ),
+    by: str = typer.Option("user", "--by", help="Recorded as the author of this change"),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Recompute lines, size and hash for existing rows"
+    ),
+    stats: bool = typer.Option(False, "--stats", help="Show totals for the file table"),
+    prune: bool = typer.Option(False, "--prune", help="Drop rows for files that no longer exist"),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+):
+    """Inspect and maintain the per-file metadata table (lines of code + description).
+
+    Tacit computes the mechanical facts — lines, bytes, language, content hash,
+    size, timestamp — and an agent supplies the compact description of what the
+    file contains. `--pending` is what an agent calls to fill the table in
+    parallel batches; `--set` is for one file you have just changed.
+    """
+    from ..core import project_tree
+
+    root = Config.find_project_root(project).resolve()
+    ensure_project_dirs(project if project else None)
+    store_dir = Config.get_memory_dir(root)
+
+    if prune:
+        removed = project_tree.prune_file_table(root, store_dir)
+        console.print(
+            f"Removed {len(removed)} stale row(s)." if removed else "No stale rows to remove."
+        )
+        return
+
+    if refresh:
+        snapshot = project_tree.load_snapshot(store_dir) or project_tree.refresh_snapshot(root, store_dir)
+        rows = project_tree.load_file_table(store_dir)
+        updated = 0
+        for entry in project_tree.snapshot_files(snapshot):
+            if entry in rows:
+                project_tree.set_file_row(root, store_dir, entry, description=None)
+                updated += 1
+        console.print(
+            f"Recomputed lines/size/hash for {updated} row(s)."
+            if updated
+            else "No rows to refresh yet — run `tacit files --pending` first."
+        )
+        return
+
+    if set_path:
+        row = project_tree.set_file_row(
+            root, store_dir, set_path, description=description, by=by
+        )
+        if row is None:
+            console.print(f"[red]No such file under {root}:[/red] {set_path}")
+            raise typer.Exit(code=1)
+        if description.strip():
+            console.print(
+                f"[green]Row updated[/green] {row['path']} "
+                f"({project_tree.format_lines(int(row.get('lines') or 0))} LOC, "
+                f"by {row.get('by')}): {row.get('description')}"
+            )
+        else:
+            console.print(f"[green]Description cleared[/green] for {row['path']}")
+        return
+
+    if stats:
+        summary = project_tree.file_table_stats(root, store_dir)
+        if as_json:
+            _print_json(summary)
+            return
+        table = Table(title="File Table", show_header=True, header_style="bold cyan")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Files in the map", str(summary["files"]))
+        table.add_row("Rows", str(summary["rows"]))
+        table.add_row("Described", str(summary["described"]))
+        table.add_row("Undescribed", str(summary["undescribed"]))
+        table.add_row("Stale (file changed since the row)", str(summary["stale"]))
+        table.add_row("Total lines", f"{summary['total_lines']:,}")
+        console.print(table)
+        if summary["languages"]:
+            console.print(
+                "[dim]Languages:[/dim] "
+                + ", ".join(f"{name} {count}" for name, count in list(summary["languages"].items())[:8])
+            )
+        return
+
+    res = project_tree.pending_files(root, store_dir, limit=limit)
+    if as_json:
+        _print_json(res)
+        return
+
+    if res["total_pending"] == 0:
+        console.print(
+            f"[green]File table is current[/green]: all {res['total_files']} files have a "
+            "fresh row with a description."
+        )
+        return
+
+    console.print(
+        f"[yellow]{res['total_pending']} file(s) need a row[/yellow] "
+        f"({res['described']}/{res['total_files']} described). Showing {res['returned']}:"
+    )
+    for entry in res["files"]:
+        facts = f"({project_tree.format_lines(entry.get('lines', 0))} LOC"
+        if entry.get("language"):
+            facts += f", {entry['language']}"
+        facts += ")"
+        console.print(f"  - {_esc(entry['path'])} {facts} — {', '.join(entry.get('reasons') or [])}")
+    console.print(
+        "\n[dim]Fill them from an agent with `project_files_update` (many entries in one "
+        "call), or one at a time here:[/dim]\n"
+        "  tacit files --set <path> --description \"contains the payment logic\""
+    )
+
+
+@app.command()
+def chronicle(
+    type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Only include this memory category"
+    ),
+    scope: str = typer.Option(
+        "",
+        "--scope",
+        help="Comma-separated scope paths; filters the timeline to those subsystems.",
+    ),
+    timeframe: str = typer.Option(
+        "all",
+        "--timeframe",
+        "-w",
+        help="Only include memories from this window: all, week, 30d, 6h, year, or an ISO date",
+    ),
+    limit: int = typer.Option(
+        chronicle_engine.DEFAULT_LIMIT,
+        "--limit",
+        "-n",
+        help="Maximum memories to render (0 = the entire history)",
+    ),
+    brief: bool = typer.Option(
+        False, "--brief", "-b", help="One line per memory instead of full content"
+    ),
+    active_only: bool = typer.Option(
+        False,
+        "--active-only",
+        help="Exclude superseded and retracted memories (default: include superseded, exclude retracted)",
+    ),
+    retracted: bool = typer.Option(
+        False, "--retracted", help="Also include memories that were retracted as wrong"
+    ),
+    content_chars: int = typer.Option(
+        chronicle_engine.DEFAULT_CONTENT_CHARS,
+        "--content-chars",
+        help="Elide each memory's content beyond this many characters (0 = never)",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print structured entries as JSON"),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Target project name or directory"
+    ),
+):
+    """Print the entire memory history oldest-first, for deep analysis.
+
+    Unlike `tacit briefing` this is not ranked or budgeted: it is the project's
+    institutional timeline since day one, including the decisions that were later
+    superseded — which is exactly what "how did we get here" needs.
+    """
+    from ..utils.scope import resolve_scope_hints
+
+    storage = get_storage(project)
+    scope_list = resolve_scope_hints(
+        [s for s in scope.split(",") if s.strip()],
+        project_root=Config.find_project_root(project),
+    )
+    res = chronicle_engine.ChronicleEngine.build(
+        storage=storage,
+        scope_hint=scope_list or None,
+        memory_type=type,
+        timeframe=timeframe,
+        include_superseded=not active_only,
+        include_retracted=retracted,
+        limit=limit,
+        brief=brief,
+        content_chars=content_chars,
+    )
+    if as_json:
+        _print_json(res)
+        return
+    console.print(res["formatted"], markup=False)
 
 
 @app.command(name="context")
@@ -1953,7 +2167,7 @@ def install_mcp(
         console.print(
             "[yellow]You can manually add this to your MCP configuration:[/yellow]"
         )
-        console.print(json.dumps({"mcpServers": {"tacit": config_entry}}, indent=2))
+        _print_json({"mcpServers": {"tacit": config_entry}})
 
 
 def _is_editable_install() -> bool:

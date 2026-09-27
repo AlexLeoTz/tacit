@@ -14,3 +14,7 @@ __pycache__/
 # ~50MB and must never be committed.
 .tacit/models/
 .tacit/_*/
+
+# Mock projects and per-machine state created by the test suite. Every fixture
+# builds its workspace under tests/_*/ so tests never touch a real project.
+/tests/_*/

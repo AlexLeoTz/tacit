@@ -84,9 +84,25 @@ def _node(storage, title, scope, impact="medium"):
 
 def test_home_and_drive_roots_are_containers(tmp_dir):
     assert Config.is_container_dir(Path.home()) is True
-    assert Config.is_container_dir(Path.home() / "Desktop") is True
     drive_root = Path(Path.cwd().anchor)
     assert Config.is_container_dir(drive_root) is True
+
+
+def test_a_directory_holding_a_registered_project_becomes_a_container(tmp_dir, monkeypatch, project):
+    """`D:\\work` is only a container once a known project lives inside it.
+
+    Asserted against an isolated registry, never the developer's: an earlier
+    version of this test passed only because the real registry happened to list a
+    project under the home Desktop folder.
+    """
+    monkeypatch.setattr(Config, "REGISTRY_FILE", tmp_dir / "tacit_projects.json")
+    holder = project.parent
+
+    assert Config.is_container_dir(holder) is False
+
+    Config.register_project(project)
+
+    assert Config.is_container_dir(holder) is True
 
 
 def test_a_repository_is_not_a_container(project):

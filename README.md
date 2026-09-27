@@ -1,202 +1,68 @@
 <div align="center">
   <img src="logo.jpg" alt="Tacit Logo" width="120" />
   <h1>Tacit</h1>
-  <p><strong>The Institutional Memory Layer and Decision Lineage Engine for AI Coding Agents</strong></p>
+  <p><strong>Institutional memory and decision lineage for AI coding agents</strong></p>
   <p>
-    <a href="#the-problem-loss-of-context-across-new-chats">The Problem</a> •
-    <a href="#how-tacit-works">How Tacit Works</a> •
-    <a href="#1-quick-start-and-installation">Quick Start</a> •
-    <a href="#2-ai-agent-integration-mcp-setup">MCP Setup</a> •
-    <a href="#3-agent-rules-automated">Master Rules</a> •
-    <a href="#4-cli-usage-and-commands">CLI Commands</a> •
-    <a href="#6-mcp-tools-reference">MCP Tools</a> •
+    <a href="#quick-start">Quick Start</a> •
+    <a href="#what-your-agent-gets">What your agent gets</a> •
+    <a href="#commands">Commands</a> •
+    <a href="#reference">Reference</a> •
     <a href="#license">License</a>
   </p>
 </div>
 
 ---
 
-## The Problem: Loss of Context Across New Chats
+Every new chat starts from zero. The model can write code, but it does not know the workaround you added for a library quirk, the deploy command that actually works, or why last month's approach was abandoned. So you re-explain it — and if you forget, the agent "cleans up" your workaround and the bug comes back.
 
-Every time you start a new chat in **Claude Code, Cursor, Antigravity, or OpenCode**, the AI model starts with a clean slate and no memory of previous sessions.
+**Tacit is a local memory layer that fixes this.** It stores distilled engineering knowledge — decisions, hacks, constraints, commands, resolved errors — in your repo, and hands it back to the agent at the start of every session. No cloud, no accounts: one SQLite file inside your project.
 
-The model knows how to write clean code, but it lacks the unwritten context of your project:
-
-* It does not know the undocumented workarounds ("hacks") you added to fix environment or library quirks.
-* It does not know the specific operational and deployment commands needed to run your services.
-* It does not know past architecture decisions or why an earlier approach was changed.
-
-Every time you reset a chat or your conversation exceeds the context window, you have to re-type setup commands, re-explain your services, and re-warn the agent about the same constraints.
-
-If you forget to explain a workaround, the AI model may assume the code looks redundant and refactor it away, which can re-introduce bugs you previously resolved.
-
----
-
-## How Tacit Works
-
-Tacit provides a local institutional memory layer for AI coding tools. At the start of a task, the agent receives a concise project briefing with active decisions, workarounds, and commands.
-
-```
- ┌──────────────────────────────────────────────────────────────────┐
- │                     AI Coding Agent                              │
- │            (Claude Code / Cursor / Antigravity)                  │
- └───────────────────────────────┬──────────────────────────────────┘
-                                 │
-                   Model Context Protocol (MCP)
-                                 │
- ┌───────────────────────────────┴──────────────────────────────────┐
- │                     Tacit Local Engine                           │
- │   Tools: memory_add, memory_search, memory_get, memory_context   │
- └───────────────────────────────┬──────────────────────────────────┘
-                                 │
-        ┌────────────────────────┼────────────────────────┐
-        ▼                        ▼                        ▼
- ┌───────────────┐        ┌───────────────┐        ┌───────────────┐
- │ Hybrid Search │        │  Causal DAG   │        │ Markdown &    │
- │ (BM25 + Dense)│        │ Lineage Engine│        │ Preview Server│
- └───────┬───────┘        └───────┬───────┘        └───────┬───────┘
-         │                        │                        │
-         ├─ Gemini (Remote API)   │                        │
-         ├─ ONNX (Local CPU)      │                        │
-         │                        │                        │
-         ▼                        ▼                        ▼
- ┌──────────────────────────────────────────────────────────────────┐
- │              Local Project Directory (.tacit/)                   │
- │              - memory.db (SQLite with Relational Edges)          │
- │              - Merkle Hash Tree & Causal Ancestry DAG            │
- └──────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Core Mechanics
-
-#### 1. Instant Session Bootstrapping (`memory_context()`)
-At the start of every session, your AI agent calls `memory_context()` to load an intelligent, token-budgeted project briefing. Memories are ranked by **PageRank authority** over the causal graph — the same backlink intuition that ranks web pages:
-
-$$\text{Authority}(d) = \text{PageRank over } child \rightarrow parent \text{ links} \qquad \text{Score}(d) = \text{Authority}(d) \times \text{Impact}(d) \times \text{Recency}(d) - \text{Penalty}(d)$$
-
-* **Authority leads**: a memory that many later memories trace back to outranks a fresh one nobody built on. A backlink from a foundational decision is worth more than one from a throwaway note.
-* **Bounded tie-breakers**: impact and recency are multipliers confined to `[0.6, 1.0]` and `[0.7, 1.0]`, so together they can reorder comparable memories but can never overturn a decisive authority gap.
-* **Supersede penalty**: a memory sitting next to a recently corrected one is pushed down, and the deduction fades over ~2 months.
-* **Token Budgeting**: Assembles the top context into **Tier 1 (deep reading with lineage)** and **Tier 2 (one-liner summaries by tag)** within your configured token budget (`TACIT_TOKEN_BUDGET`).
-
-Pass `timeframe` (`week`, `30d`, an ISO date, …) to restrict *which* memories may appear. Authority is always computed over the whole active graph — ranking only within a recent window would leave a handful of memories with almost no links between them, where every score is identical.
-
-#### 2. Causal DAG and The "REPLACED" Sticker System
-Engineering history is immutable; you should never erase past lessons. When an architectural choice changes, Tacit attaches a typed **`supersedes`** edge to the old entry pointing to the new one, explaining *why* it was replaced. 
-* Dead advice is filtered out of active briefings so stale rules never poison fresh prompts.
-* If an agent inspects an old decision, Tacit shows a warning banner: `⚠️ SUPERSEDED by <successor_id>: "<reason>"`.
-* The complete causal ancestry (`derives_from` and `supersedes`) remains inspectable.
-
-#### 3. Autonomous End-of-Task Reflection
-Tacit turns your AI coding tool into an active collaborator in memory hygiene. Every task that changes the codebase ends with a mandatory checkpoint that classifies the knowledge into a closed taxonomy, documents what changed in the code, states how it was verified, and links the causal graph. Only genuinely behaviour-free changes (formatting, comment or typo fixes) are exempt.
-
-#### 4. Hybrid Search Engine (BM25 + Embeddings, ranked by Authority)
-Combines exact lexical keyword matching (SQLite FTS5 / BM25) with dense semantic embeddings using **Reciprocal Rank Fusion (RRF)**, then multiplies by the same PageRank authority used for briefings:
-
-$$\text{RRF}(d) = \sum_{r \in \text{channels}} \frac{1}{60 + \text{rank}_r(d)} \qquad \text{Score}(d) = \text{RRF}(d) \times \text{Scope} \times \text{Recency} \times \bigl(0.5 + 0.5 \cdot \text{Authority}(d)\bigr)$$
-
-Relevance says *"about the query"*; authority says *"worth reading"*. Because they multiply, neither can rescue the other — a highly-cited but off-topic memory cannot surface for an unrelated query.
-
-* **Embedding providers are pluggable**: `OPENAI_API_KEY` (`text-embedding-3-small`, 1536-dim) → `GEMINI_API_KEY` (`gemini-embedding-001`, 768-dim) → local fastembed ONNX (`bge-small-en-v1.5`, 384-dim, offline and zero-config).
-* **Only titles, tags and summaries are embedded** — never the full content. That makes a write roughly 10× cheaper and produces a sharper vector, but it also means the title is the search index. The agent rules require a specific, self-descriptive title on every entry.
-* **Exact symbols, flags, and error codes** are protected by BM25 exact matching.
-* **Switching providers requires `tacit reindex --force`**: vectors from different models are not comparable, and Tacit will tell you when stored vectors no longer match the active provider rather than silently returning nothing.
-
-#### 5. Multi-Tier Candidate Auto-Linking & Interactive Orphan Warnings
-To prevent isolated orphan nodes and guarantee graph lineage:
-* **Multi-Signal Affinity Ranking**: Evaluates Scope Overlap (0.40), Tag Jaccard Similarity (0.30), Keyword Overlap (0.20), Cross-Type Causality (e.g. `error` $\rightarrow$ `decision`, 0.08), and Recency Decay (0.10).
-* **Automatic High-Confidence Linking ($\ge 0.50$)**: High-affinity parents are automatically attached and annotated.
-* **Interactive Graph Notice ($0.15 \le \text{Score} < 0.50$)**: Emits a `[TACIT GRAPH NOTICE]` in the tool result with ranked candidate parents and ready-to-run `memory_link` commands so the agent can quickly connect relationships.
-
-#### 6. Cryptographic Proofs and Dual-Write Storage
-* Every memory is addressed by its **SHA-256 content hash** and linked via a **Merkle root**. `tacit verify` verifies history has not been altered.
-* **Dual-Write**: Saves to `memory.db` for fast agent queries and maintains human-readable `.md` files in `.tacit/<category>/`.
-
----
-
-## Table of Contents
-1. [Quick Start and Installation](#1-quick-start-and-installation)
-2. [AI Agent Integration (MCP Setup)](#2-ai-agent-integration-mcp-setup)
-3. [Agent Rules (Automated)](#3-agent-rules-automated)
-4. [CLI Usage and Commands](#4-cli-usage-and-commands)
-5. [Live Markdown Preview Server and Dashboard](#5-live-markdown-preview-server-and-dashboard)
-6. [MCP Tools Reference](#6-mcp-tools-reference)
-7. [Multi-Project Support](#7-multi-project-support)
-8. [Testing](#8-testing)
-9. [License](#license)
-
----
-
-## 1. Quick Start and Installation
-
-To get Tacit running in your environment, execute the following commands in sequence:
-
-### Step 1: Install Tacit from source
 ```bash
-# Clone the repository
+pip install -e .                 # from a clone
+tacit install-mcp --client claude-code   # or cursor / antigravity / deepseek-harness
+cd /path/to/your/project && tacit init
+```
+
+That's it. From then on your agent briefs itself before it starts work, and records what it learned when it finishes.
+
+---
+
+## What your agent gets
+
+**A briefing, not a dump.** `memory_context()` returns a token-budgeted set of memories ranked by *PageRank authority* over the decision graph — how many later decisions trace back to it. Foundational choices outrank fresh notes, and the graph is computed over the whole project, so a recent window never flattens the ranking.
+
+**History on demand.** `memory_chronicle` returns *every* memory oldest-first — including the decisions that were later replaced — for questions like "why is it built this way?" or "have we tried this before?".
+
+**A map of the codebase.** `project_structure` returns the captured layout — directories, file names, line counts, and a one-line description of what each file contains — so a new session knows where things are without opening twenty files.
+
+**Scope that actually filters.** Tell it you are working in `backend/app` and you get `backend/app` memories. Not "mostly", not "boosted": other subsystems are excluded, and project-wide knowledge is always included. Memories from another repository cannot appear at all.
+
+**Search that respects the graph.** Hybrid BM25 + embeddings fused by RRF, then weighted by authority. Titles, tags and summaries are embedded — never full content — which is why the agent rules insist on specific titles.
+
+---
+
+## Quick Start
+
+**1. Install**
+
+```bash
 git clone https://github.com/AlexLeoTz/tacit.git
 cd tacit
-
-# Install globally on your machine (editable mode for active development)
 pip install -e .
 ```
 
-> [!TIP]
-> **Updating later**: `tacit update` detects an editable (`pip install -e .`) checkout and updates it in place with `git pull` + `pip install -e .`, so the clone you installed from is never replaced by a Git-URL install. Verify the result with `tacit --version`.
+> Updating later: `tacit update` detects an editable checkout and updates it in place (`git pull` + `pip install -e .`). Confirm with `tacit --version`, which prints the version *and* the directory the running code came from.
 
----
+**2. Register the MCP server with your editor**
 
-### Step 2: Register MCP server globally
-This registration command modifies your editor configuration globally. It can be run from any folder:
 ```bash
-# For Antigravity IDE & CLI
-tacit install-mcp --client antigravity
-
-# For Claude Code (Terminal CLI)
-tacit install-mcp --client claude-code
-
-# For Cursor
-tacit install-mcp --client cursor
-
-# For Deepseek harness
-tacit install-mcp --client deepseek-harness
+tacit install-mcp --client antigravity   # or: claude-code | claude | cursor | deepseek-harness
 ```
 
----
+<details>
+<summary>Manual configuration</summary>
 
-### Step 3: Initialize the project memory directory
-Navigate to your specific project workspace directory (e.g. `cd /path/to/my-project`) and initialize the database. Run this command inside your project root directory:
-```bash
-tacit init
-```
-
----
-
-### Step 4: Run the live markdown preview server
-Start the web dashboard to search, view, and insert project memories directly. Run this command inside your project root directory:
-```bash
-tacit serve
-```
-
----
-
-## 2. AI Agent Integration (MCP Setup)
-
-Tacit runs as a local MCP server that automatically detects whichever project directory your coding tool has open.
-
----
-
-### Manual MCP Configuration and Client Setup
-
-Tacit runs locally as an **STDIO MCP server**: a local background process communicated with via standard input/output streams by your AI coding client.
-
-> [!NOTE]
-> **Harness Compatibility**: Tacit is tested and verified to work natively in **Antigravity CLI**, **Claude Desktop**, **Claude Code**, and **Cursor**.
-
-#### 1. Claude Code and Claude Desktop
-Add this to your `claude_desktop_config.json` (on Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+Add to your client's MCP config (`claude_desktop_config.json` on Windows lives at `%APPDATA%\Claude\`):
 
 ```json
 {
@@ -209,354 +75,150 @@ Add this to your `claude_desktop_config.json` (on Windows: `%APPDATA%\Claude\cla
 }
 ```
 
-#### 2. Cursor
-Go to **Settings** -> **Features** -> **MCP**, click **+ Add New MCP Server**, and configure:
-* **Name**: `tacit`
-* **Type**: `stdio`
-* **Command**: `tacit mcp`
+For Cursor: **Settings → Features → MCP → + Add New MCP Server**, type `stdio`, command `tacit mcp`.
+</details>
 
----
+**3. Initialize your project**
 
-## 3. Agent Rules (Automated)
-
-When you run `tacit init` in any project, it generates rule files automatically:
-* **Antigravity / AGY CLI**: `.agents/rules/tacit.md`
-* **Cursor**: `.cursorrules`
-* **MCP Prompts**: Exposed directly over the MCP protocol as `tacit-instructions`.
-
-### What Tacit Stores vs What It Does NOT Store
-* **Tacit Stores**: Distilled tacit knowledge: non-obvious design choices, undocumented workarounds (hacks), specific environment dependencies, critical operational commands, and resolved error caveats.
-* **Tacit Does NOT Store**: Raw chat history, full conversation logs, copy-pasted terminal output, or entire source code files/snippets. Tacit is an institutional decision ledger, not a code repository or log sink.
-
-### Agent Workflow Protocols
-1. **Bootstrap (`memory_context`)**: Query project context at the start of a session or when working in a new area.
-2. **Pre-Decision Validation**: Before proposing, planning, or implementing any architectural change, library addition, or refactor, the agent checks memory to verify if that decision is allowed or if an earlier attempt was already invalidated.
-3. **Lineage (`parents` & `supersedes`)**: Link new decisions to parent nodes or indicate when a past decision is being superseded.
-4. **Autonomous Self-Reflection**: At the conclusion of non-trivial tasks, record new distilled tacit knowledge.
-
----
-
-## 4. CLI Usage and Commands
-
-You can run `tacit` in any project directory on your machine. It automatically discovers and initializes the `.tacit/` directory for that workspace.
-
-### Initialize a Project
 ```bash
-# Run in the root of your project
+cd /path/to/my-project
 tacit init
 ```
 
-### View Relevance-Ranked Session Briefing
-```bash
-# Generates DAG-centrality and recency-decayed project briefing
-tacit briefing
+This creates `.tacit/` (database + config), writes agent rules into `.agents/rules/tacit.md` and `.cursorrules`, and asks whether to keep a project-structure snapshot.
 
-# Or customize token budget directly
-tacit briefing --budget 1500
+**4. Optional: the dashboard**
+
+```bash
+tacit serve      # http://localhost:4000 — search, browse and write memories
 ```
 
-### Search Memories (Hybrid BM25 + ONNX Embeddings)
-```bash
-# Hybrid semantic search with RRF fusion (default)
-tacit search "database connection exhaustion"
+---
 
-# Keyword-only search
-tacit search "docker" --mode keyword --type command
+## Commands
 
-# Search with active file scope boosting
-tacit search "authentication" --scope src/api/auth.py
+The handful you will actually type:
 
-# Include historical or superseded memories
-tacit search "JWT" --include-superseded
-```
-
-### Backfill Vector Embeddings
-```bash
-# Embed all memories missing embeddings (idempotent and resumable)
-tacit reindex
-
-# Rebuild every vector — required after switching embedding provider
-tacit reindex --force
-```
-
-### Record a Memory
-```bash
-# Add a decision
-tacit remember "Migrated authentication from sessions to JWT with 15-minute rotation" \
-  --type decision \
-  --tags "auth,security,jwt" \
-  --impact high
-
-# Add a decision that supersedes a previous one
-tacit remember "Reverted to sessions due to JWT refresh rotation vulnerabilities" \
-  --type decision \
-  --tags "auth,security,session" \
-  --impact high \
-  --supersedes 4a9f1234 \
-  --relation-note "JWT token leakage risk in distributed workers"
-
-# Add a command
-tacit remember "docker compose -f docker-compose.prod.yml up -d --build" \
-  --type command \
-  --tags "deploy,docker,prod"
-
-# Add a workaround / hack with parent links
-tacit remember "Temporary fix for SQLite thread lock: set WAL mode and 5s timeout" \
-  --type hack \
-  --tags "sqlite,db,bugfix" \
-  --parents 54bd72c1
-```
-
-### Verify Cryptographic Integrity
-```bash
-# Recomputes and checks SHA-256 hashes and Merkle lineage across all nodes
-tacit verify
-```
-
-### Lifecycle Management (Supersede and Retract)
-```bash
-# Mark a memory node as superseded by a successor
-tacit supersede <old_node_id> --by <new_node_id> --reason "Revised architecture"
-
-# Retract an erroneously recorded entry
-tacit retract <node_id> --reason "Never deployed"
-```
-
-### View Recent Memories
-```bash
-# Show memories recorded in the last 7 days
-tacit recent --days 7
-
-# Show last 20 memories of type 'error'
-tacit recent --days 30 --type error --limit 20
-```
-
-### Retrieve a Specific Memory
-```bash
-# Requires the complete UUID; --raw prints the stored Markdown with no panel
-tacit get a1b2c3d4-e5f6-7890-abcd-ef1234567890
-tacit get a1b2c3d4-e5f6-7890-abcd-ef1234567890 --raw
-```
-
-> `get` is an exact lookup — find the UUID with `tacit grep "KEYWORD"` or
-> `tacit search "QUERY"`, both of which print it in full. Content is shown
-> verbatim, brackets and all.
-
-### Relocate the Memory Store
-```bash
-# Move .tacit into a subfolder, leaving a pointer so every command keeps working
-tacit move agent-memory
-#   <root>/.tacit  ->  <root>/agent-memory/.tacit
-
-# Move it back to the project root
-tacit move .
-```
-
-> The move is not a copy: the database, exported Markdown and offline model cache
-> travel together. A one-line pointer at `<root>/.tacit/location` records the new
-> path, so discovery, the CLI, the MCP tools and the dashboard are unaffected.
-
-### Grep Titles and Summaries
-```bash
-# Literal, case-insensitive substring match over titles and summaries only
-tacit grep pgvector
-
-# Narrow by type, and include superseded entries
-tacit grep "WinError 32" --type error --all-status
-```
-
-> `grep` never reads `content` and needs no embedding model, so it works even when
-> semantic search is unavailable. Use `tacit search "..."` when you know the meaning
-> rather than the words.
-
-### Export Standalone Markdown Documentation
-```bash
-# Export all memories to categorized markdown files with an INDEX.md table of contents
-tacit export
-
-# Export to a custom backup folder
-tacit export --output ./docs/project-memories
-```
-
-### Configuration Options and Environment Variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
-| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | FastEmbed ONNX embedding model. |
-| `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
-### Live Markdown Preview Server & Visual Dashboard
-```bash
-# Start visual dashboard & live preview server (defaults to http://localhost:4000)
-tacit serve
-# Or use the dashboard alias:
-tacit dashboard
-
-# Start with custom ports or without opening a browser window
-tacit serve --port 3000 --ws-port 3001 --no-open
-```
-
-### Visualizing Causal DAGs and Lineage
-```bash
-# Renders the entire project decision DAG as a nested tree
-tacit tree
-
-# Traces causal foundations (ancestors) and derived decisions (descendants) for a specific node
-tacit lineage 4a9f
-```
-
-### Managing Registered Workspaces
-```bash
-# List all registered and discovered project workspaces on this machine
-tacit projects
-```
-
-### Deleting or Clearing Memories
-```bash
-# Delete a specific memory node from SQLite and export directory
-tacit delete <node_id>
-
-# Clear all memories from the current project database (requires confirmation)
-tacit clear
-```
-
-### Updating Tacit Globally
-```bash
-# Update Tacit to the latest version from GitHub and refresh project rule files
-tacit update
-
-# Confirm the installed version (use this instead of guessing)
-tacit --version
-```
-
-If Tacit was installed from a clone with `pip install -e .`, the update automatically runs `git pull` + `pip install -e .` instead of installing from the Git URL. Force the source path explicitly with `tacit update --source`.
-
-**Windows notes.** A running `tacit.exe` (including an MCP server started by your editor) cannot be replaced in place — that is the source of the `[WinError 32] ... tacit.exe -> tacit.exe.deleteme` error. `tacit update` handles this for you: it runs detached, waits for the current process to exit, stops leftover `tacit serve`/`tacit mcp` daemons *and* their backing `python.exe` processes, quarantines the old launcher, clears stale `~acit-…dist-info` leftovers, and then reinstalls.
-
-Because that updater has no console, its output goes to:
-
-| Path | Contents |
+| Command | What it does |
 |---|---|
-| `~/.gemini/config/tacit_update.log` | Full updater log, including raw `pip` output |
-| `~/.gemini/config/tacit_update_status.json` | Machine-readable result of the last run |
-
-Run `tacit update` again to be shown the log path and the failure reason if the previous run did not finish cleanly. If it keeps failing, quit the editors that have the Tacit MCP server configured and re-run it.
-
-**Verify you are updating the checkout you think you are.** `tacit --version` prints both the version and the directory the running code came from:
-
-```
-tacit 0.1.0
-D:\startups-ideas\tacit\tacit
-```
-
-An editable install (`pip install -e .`) stays pinned to the directory it was installed from, so a *different* clone is never the one being executed. If that path is not the checkout you are working in, reinstall from the right one (`cd <checkout> && pip install -e .`); `tacit update` also warns about this when it detects the mismatch.
-
-### Configuration Options and Environment Variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GEMINI_API_KEY` | `None` | Google Gemini API key for `gemini-embedding-001` (768-dim) embeddings. Used when `OPENAI_API_KEY` is not set. If neither key is set, Tacit falls back to local fastembed ONNX on CPU. |
-| `OPENAI_API_KEY` | `None` | OpenAI API key for `text-embedding-3-small` (1536-dim) embeddings. Highest-priority provider. |
-| `TACIT_OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embedding model to use. |
-| `TACIT_TOKEN_BUDGET` | `2000` | Token budget cap for `memory_context()` and `tacit briefing`. |
-| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local FastEmbed ONNX embedding model (used only when no API key is set). |
-| `TACIT_EMBED_CACHE` | per-user cache dir | Where the downloaded ONNX model is stored. Set this when the default cache is not writable (sandboxes, containers); Tacit otherwise falls back to `<project>/.tacit/models` automatically. |
-| `TACIT_PROJECT` | CWD | Default project path, overriding CWD-based discovery. |
-| `TACIT_DUAL_WRITE` | `true` | Auto-sync `.md` files into `.tacit/<category>/`. Set `false` for SQLite-only. |
-| `PREVIEW_PORT` | `4000` | HTTP port for the web dashboard. |
-| `PREVIEW_WS_PORT` | `4001` | WebSocket port for live updates. |
+| `tacit briefing` | Ranked, budgeted session briefing (`--scope backend/app` to narrow it) |
+| `tacit chronicle` | Every memory oldest-first — `--brief` for a one-line timeline |
+| `tacit remember "..."` | Record a decision, hack, command or error |
+| `tacit search "query"` | Hybrid BM25 + semantic search |
+| `tacit grep pgvector` | Literal match over titles and summaries (no model needed) |
+| `tacit get <uuid>` | Print one memory verbatim (`--raw` for plain Markdown) |
+| `tacit structure` | The captured codebase map (`--refresh` to re-walk it) |
+| `tacit files` | The per-file table: `--pending`, `--set`, `--refresh`, `--stats` |
+| `tacit serve` | Local dashboard and Markdown preview |
+| `tacit update` | Update Tacit itself |
+| `tacit --help` | Everything else: `tree`, `lineage`, `export`, `verify`, `move`, `projects`, `supersede`, `retract`, `reindex`, `delete`, `clear`, `mcp` |
 
 ---
 
-## 5. Live Markdown Preview Server and Dashboard
+## For agents
 
-Tacit includes a local interactive web dashboard (`tacit dashboard` / `tacit serve`) with live WebSocket reload, project switcher, search, category filtering, and markdown rendering.
+`tacit init` writes rules your agent reads automatically, so the loop works without you prompting it:
 
-```bash
-# 1. Start live preview server and web dashboard (defaults to HTTP: 4000, WebSocket: 4001)
-tacit serve
-# Or
-tacit dashboard
+1. **Start**: brief on the project, then read the structure map, then fill any missing file-table rows.
+2. **Before deciding**: check whether the decision is already made, constrained, or was already tried and rejected.
+3. **Finish**: record what changed and how it was verified, link it to the decisions it derives from, and refresh the file rows touched.
 
-# 2. Specify custom ports for both HTTP and WebSocket
-tacit serve --port 3000 --ws-port 3001
-
-# 3. Target a specific project directory
-tacit dashboard --project /path/to/another-project
-```
-
-> **Smart Instance Detection**: If a Tacit server or dashboard is already running on port 4000, `tacit serve` detects the active instance, opens your browser to the running dashboard, and exits cleanly without spawning duplicate server processes.
-
+Tacit stores distilled knowledge only — never chat logs, terminal output or source files.
 
 ---
 
-## 6. MCP Tools Reference
+# Reference
 
-When connected via MCP, AI agents have access to the following tools:
+The deep end. Skip it unless you are changing Tacit or debugging it.
 
-| Tool | Purpose | Key Arguments |
+## MCP tools
+
+| Tool | Purpose | Key arguments |
 |---|---|---|
-| `memory_add` | Persist an immutable decision, command, hack, architecture, or error. `scope` is mandatory in practice: it is the filter future reads apply. | `content`, `type`, `summary`, `title`, `tags`, `scope`, `impact`, `parents`, `supersedes`, `relation_note`, `project` |
-| `memory_link` | Explicitly attach or adjust causal edges between nodes (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
-| `memory_search` | Hybrid search (BM25 + dense vectors via RRF), ranked by relevance × PageRank authority, filtered by scope. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `include_superseded`, `debug`, `project` |
-| `memory_get` | Fetch markdown content and Merkle lineage by exact UUID. Shows alert banners if superseded or retracted. | `node_id`, `project` |
-| `memory_grep` | Literal case-insensitive substring match over titles and summaries only. No embeddings, no content scan, so it works when the provider is unavailable. | `keyword`, `type`, `limit`, `include_superseded`, `scope_hint`, `project` |
-| `memory_recent` | List chronological memories from the last N days. | `days`, `limit`, `scope_hint`, `project` |
-| `memory_context` | Generate a token-budgeted project briefing ranked by PageRank authority (impact and recency as bounded tie-breakers). | `budget`, `scope_hint`, `timeframe`, `project` |
-| `project_structure` | The captured workspace map — directories and file names, never source — annotated with stored per-file gists. | `refresh`, `path`, `include_gists`, `max_lines`, `project` |
-| `project_gist` | Record a one-line note about what a file contains, shown beside it in the map. | `path`, `gist`, `author`, `project` |
-| `memory_projects`| List all registered project workspaces across your machine. | None |
+| `memory_add` | Record one immutable memory. `scope` is mandatory in practice — it is the filter every later read applies. | `content`, `type`, `title`, `summary`, `tags`, `scope`, `impact`, `parents`, `supersedes`, `project` |
+| `memory_add_batch` | Record several related memories atomically (`$prev` links them). | `entries`, `project` |
+| `memory_search` | Hybrid search, scope-filtered, ranked relevance × authority. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `project` |
+| `memory_context` | The briefing. | `budget`, `timeframe`, `scope_hint`, `project` |
+| `memory_chronicle` | Full history, oldest first, superseded included. | `brief`, `limit` (0 = all), `type`, `timeframe`, `scope_hint`, `project` |
+| `memory_get` | One memory by exact UUID, with lineage banners. | `node_id`, `project` |
+| `memory_grep` | Literal substring match over titles and summaries. | `keyword`, `type`, `limit`, `scope_hint`, `project` |
+| `memory_recent` | Chronological recent memories. | `days`, `limit`, `scope_hint`, `project` |
+| `memory_link` | Attach an edge (`derives_from`, `supersedes`, `related`). | `child_id`, `parent_id`, `relation`, `reason` |
+| `memory_pin` | Pin memories so they always appear in the briefing. | `ids`, `unpin`, `project` |
+| `project_structure` | The workspace map: names, nesting, line counts, descriptions. | `refresh`, `path`, `include_gists`, `max_lines`, `project` |
+| `project_files_pending` | Files whose table row is missing or stale, with facts precomputed. | `limit`, `project` |
+| `project_files_update` | Write many file rows in one call (records author + timestamp). | `entries`, `by`, `project` |
+| `project_gist` | Describe a single file. | `path`, `gist`, `author`, `project` |
+| `memory_projects` | Every workspace registered on this machine. | — |
+
+Plus one prompt, `tacit-instructions`, carrying the same rules the CLI writes into your repo.
 
 ### Scope is a filter, and `project` selects the workspace
 
-* **`scope_hint` filters.** Only memories recorded against those paths — plus project-wide memories — are returned. Omitting it reads the **whole workspace**. An empty answer names the scope that emptied it, so a wrong scope is never mistaken for missing knowledge.
-* **`project` names the workspace.** Always pass your workspace root: one Tacit MCP server can serve several workspaces at once, and without `project` a call can only fall back to the directory the server was launched in.
-* **Tacit never invents a store.** If the launch directory is a container — a home directory, drive root, system or temp folder — or has no project marker at all (`.tacit`, `.git`, `pyproject.toml`, `package.json`), `tacit mcp` refuses to create a store there and every call without `project` reports it, rather than letting one store answer for every workspace underneath.
+* **`scope_hint` filters.** Only memories recorded against those paths — plus project-wide memories — are returned. Omitting it reads the whole workspace. An empty answer names the scope that emptied it, so a wrong scope is never mistaken for missing knowledge.
+* **`project` names the workspace.** One Tacit MCP server can serve several workspaces; pass your workspace root on every call. Without it, the call falls back to the directory the server was launched in.
+* **Tacit never invents a store.** If the launch directory is a container (home, drive root, system or temp folder) or has no project marker (`.tacit`, `.git`, `pyproject.toml`, `package.json`), `tacit mcp` refuses to create a store there and reports it rather than letting one store answer for every workspace underneath.
 
-> Deletion is restricted to developers via the CLI (`tacit delete <id>`) or Dashboard UI to prevent AI agents from removing historical institutional memory.
+## How ranking works
 
----
+Briefing score, per memory:
 
-## 7. Multi-Project Support
+$$\text{Score} = \text{Authority} \times (0.6 + 0.4 \cdot \text{Impact}) \times (0.7 + 0.3 \cdot \text{Recency}) \times (1 + \text{type prior}) - \text{penalty}$$
 
-Tacit keeps each codebase's memories isolated:
-- Every project stores its database at `<project-root>/.tacit/memory.db`.
-- Auto-detects the project root from `.git`, `package.json`, `pyproject.toml`, or `.tacit`.
-- A workspace root may hold several repositories (`backend/` + `frontend/`): Tacit discovers them by looking for `.git`, or you can pin them explicitly with `tacit structure --set-repos backend,frontend`.
-- Container directories (home, drive root, system or temp folders) are never treated as a project root, and neither is a directory with no project marker, so unrelated workspaces cannot end up sharing one store. `tacit init` is the one command that may create a project in a plain directory.
-- Track all projects on your machine with:
-  ```bash
-  tacit projects
-  ```
+* **Authority** is PageRank over `child → derives_from → parent` links. A memory many later memories build on outranks a fresh one nobody referenced.
+* **Impact and recency are bounded tie-breakers**: together they can reorder comparable memories, never overturn a decisive authority gap.
+* **Penalty** pushes down a memory adjacent to a recently corrected one, fading over ~2 months.
+* **Search** is `RRF × recency × (0.5 + 0.5 · authority)`; relevance and authority multiply, so neither can rescue the other.
 
----
+Token budget comes from `TACIT_TOKEN_BUDGET` (default 2000): the top slice is rendered in full with lineage, the remainder as one-liners grouped by tag.
 
-## 8. Project Structure Map
+## Memory model
 
-`tacit init` offers to keep a **project structure snapshot** for the workspace: directory and file **names only, never source code or secrets**, stored at `<store>/project-tree.json`. It lets a new agent session learn the layout in a single call instead of exploring file by file.
+* **Immutable nodes.** A change of mind is a *new* node with a `supersedes` edge, never an edit. Superseded guidance is filtered out of briefings but stays inspectable, with a warning banner when read directly.
+* **Closed taxonomy.** `decision`, `command`, `hack`, `architecture`, `error`, `context`, `constraint`, `convention`, `security`, `performance`, `integration`, `migration`.
+* **Integrity.** Every node carries a SHA-256 `content_hash` and a Merkle root over its ancestry; `tacit verify` recomputes both.
+* **Dual-write.** Memories live in `memory.db` *and* as human-readable Markdown under `.tacit/<category>/` (`TACIT_DUAL_WRITE=false` for SQLite only).
+* **Auto-linking.** A candidate parent at affinity ≥ 0.50 is attached silently; 0.15–0.50 emits a `[TACIT GRAPH NOTICE]` listing candidates for the agent to link.
 
-```bash
-tacit structure                 # print the captured map
-tacit structure --refresh       # re-walk the filesystem and update it
-tacit structure --path backend  # narrow the map to a subdirectory
-tacit structure --repos         # list the git repositories discovered
-tacit structure --set-repos backend,frontend
-tacit structure --enable | --disable
-```
+## Multi-project and the file table
 
-Agents read it with the `project_structure` tool and attach what they learn about individual files with `project_gist(path="backend/app/Models/Film.php", gist="Eloquent model for films")`. Those one-line gists then appear beside the file name in every later map.
+* Every project keeps its own database at `<project-root>/.tacit/memory.db`; the root is discovered from `.tacit`, `.git`, `pyproject.toml` or `package.json`.
+* A workspace root may hold several repositories (`backend/` + `frontend/`): they are discovered by looking for `.git`, or pinned with `tacit structure --set-repos backend,frontend`.
+* Container directories — and directories with no project marker at all — are never treated as a project root, so unrelated workspaces cannot end up sharing one store. `tacit init` is the one command that may create a project in a plain directory.
+* `tacit projects` lists every workspace registered on the machine.
+* `tacit move <subfolder>` relocates a store (database, exports and model cache together) and leaves a pointer at `<root>/.tacit/location`, so nothing else changes.
 
-Dependency trees, build output and caches (`node_modules`, `vendor`, `.venv`, `dist`, `.git`, …) are skipped; `.env` and other dotfiles are included because they are part of the layout.
+**The file table.** `tacit init` can keep a structure snapshot of the workspace: directory and file **names only, never source code**, plus one row of metadata per file — lines of code, size, language, content hash, a compact description, and who last updated it and when. Agents read it with `project_structure`, fill missing rows with `project_files_pending` + `project_files_update`, and refresh rows after editing a file; a row whose hash no longer matches the file is reported as stale. Dependency trees, build output and caches are skipped; dotfiles such as `.env` are kept, because they are part of the layout.
 
----
+## Environment variables
 
-## 9. Testing
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | — | `text-embedding-3-small` (1536-dim). Highest-priority embeddings. |
+| `GEMINI_API_KEY` | — | `gemini-embedding-001` (768-dim). Used when no OpenAI key is set. |
+| `TACIT_OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI model override. |
+| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local ONNX model (only when no API key is set). |
+| `TACIT_EMBED_CACHE` | per-user cache | Where the ONNX model is stored; falls back to `<project>/.tacit/models` when the default is not writable. |
+| `TACIT_TOKEN_BUDGET` | `2000` | Briefing token budget. |
+| `TACIT_PROJECT` | CWD | Pin the workspace, overriding directory discovery. |
+| `TACIT_HOME` | `~/.gemini/config` | Where the cross-project registry and update cache/log live. Set it to keep that state elsewhere (portable installs, tests, containers). |
+| `TACIT_DUAL_WRITE` | `true` | Write Markdown beside the database. |
+| `TACIT_NO_PATH_VALIDATION` | — | Set `true` to skip validating that `scope` paths exist. |
+| `PREVIEW_PORT` / `PREVIEW_WS_PORT` | `4000` / `4001` | Dashboard ports. |
 
-Run the test suite using `pytest`:
+## Updating Tacit
+
+If Tacit was installed editable, `tacit update` runs `git pull` + `pip install -e .` in place instead of installing from the Git URL. `tacit --version` prints the version and the directory the code came from — if that path is not the checkout you are editing, reinstall from the right one.
+
+**Windows.** A running `tacit.exe` (including the MCP server your editor started) cannot be replaced in place — hence `[WinError 32] ... tacit.exe -> tacit.exe.deleteme`. `tacit update` handles this: it runs detached, waits for the current process to exit, stops leftover `tacit serve`/`tacit mcp` daemons and their backing `python.exe`, quarantines the old launcher, clears stale `~acit-…dist-info` leftovers, then reinstalls. Because the detached updater has no console, its output goes to `~/.gemini/config/tacit_update.log` and `tacit_update_status.json`; the *next* `tacit` command reports how the run ended. If it keeps failing, quit the editors that have the Tacit MCP server configured and re-run it.
+
+## Testing
 
 ```bash
 pytest tests/ -v
 ```
+
+The suite is self-contained: every fixture builds a mock project under `tests/_*/`, and `tests/conftest.py` redirects Tacit's per-machine state (`TACIT_HOME`) into the workspace, so a run never touches your real registry or projects.
 
 ---
 
@@ -564,9 +226,8 @@ pytest tests/ -v
 
 This project is licensed under the **Functional Source License, Version 1.1, MIT Conversion** ([`FSL-1.1-MIT`](./LICENSE)).
 
-### Plain English Summary:
-* **Free for Developers and Organizations**: You are free to use Tacit, modify it, integrate it into your internal workflows, deploy it in products, and redistribute it without fees.
-* **The Only Restriction**: For a period of **two years** from each release date, third parties cannot take Tacit and offer it as a competing commercial cloud service or managed SaaS platform.
-* **Automatic Conversion to MIT**: Exactly two years after each release, the license for that version automatically and permanently converts to the standard **MIT License**.
+* **Free for developers and organizations**: use it, modify it, integrate it, deploy it, redistribute it.
+* **The only restriction**: for two years from each release, third parties cannot offer it as a competing commercial cloud service or managed SaaS platform.
+* **Automatic conversion to MIT**: exactly two years after each release, that version's license permanently becomes standard **MIT**.
 
-See the [`LICENSE`](./LICENSE) file for complete legal terms.
+See [`LICENSE`](./LICENSE) for the complete terms.
