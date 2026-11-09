@@ -22,14 +22,17 @@ setup(
         "typer>=0.9.0",
         "rich>=13.0.0",
         "pydantic>=2.0.0",
-        "mcp>=0.1.0",
+        "mcp>=0.1.0,<2",
         "websockets>=12.0",
         "markdown>=3.5.0",
         "python-dotenv>=1.0.0",
         "watchdog>=3.0.0",
-        "fastembed>=0.4.0",
         "numpy>=1.24.0",
     ],
+    extras_require={
+        "local": ["fastembed>=0.4.0"],
+        "dev": ["pytest>=7.0.0", "PyYAML>=6.0"],
+    },
     entry_points={
         "console_scripts": [
             "tacit=src.cli.main:app",

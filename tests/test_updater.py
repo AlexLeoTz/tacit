@@ -720,7 +720,7 @@ def test_update_warns_when_cwd_is_a_different_checkout(monkeypatch, tmp_dir):
 
     assert result.exit_code == 0
     assert "different checkout" in result.stdout
-    assert str(foreign) in result.stdout
+    assert "the-clone-you-edit" in result.stdout
     assert "pip install -e ." in result.stdout
 
 

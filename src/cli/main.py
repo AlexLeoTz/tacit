@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import uuid
-import yaml
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -2056,6 +2055,15 @@ def install_mcp(
                 "failOnStartupError": False,
             },
         }
+
+        try:
+            import yaml
+        except ImportError:
+            console.print(
+                "[red]PyYAML is required for DeepSeek Harness configuration.\n"
+                "Install it with: pip install pyyaml[/red]"
+            )
+            raise typer.Exit(code=1)
 
         # The patch layer is a top-level YAML LIST of patch entries; a plugin
         # row must be wrapped in an `insert:` entry.

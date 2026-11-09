@@ -49,6 +49,9 @@ That's it. From then on your agent briefs itself before it starts work, and reco
 git clone https://github.com/AlexLeoTz/tacit.git
 cd tacit
 pip install -e .
+
+# Optional: install offline local embedding model (ONNX)
+pip install -e ".[local]"
 ```
 
 > Updating later: `tacit update` detects an editable checkout and updates it in place (`git pull` + `pip install -e .`). Confirm with `tacit --version`, which prints the version *and* the directory the running code came from.
