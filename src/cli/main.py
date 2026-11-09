@@ -2017,19 +2017,47 @@ def install_mcp(
 
         # A dsh profile is a DIRECTORY (cordis.yml + cordis.patch.yml +
         # package.json). There is no per-profile .yaml file.
-        profile = os.environ.get("DSH_PROFILE", "web")
+        available = (
+            sorted(
+                p.name
+                for p in profiles_dir.iterdir()
+                if p.is_dir() and (p / "cordis.yml").exists()
+            )
+            if profiles_dir.is_dir()
+            else []
+        )
+
+        # Resolve the profile dsh itself is using: $DSH_PROFILE, then the
+        # basename of $DSH_PROFILE_DIR (both exported inside every dsh
+        # session), then the only profile on disk, then the historical
+        # "web" default. Never assume "web" when the machine only has,
+        # say, a "desktop" profile.
+        profile = os.environ.get("DSH_PROFILE", "").strip()
+        if not profile:
+            profile_dir = os.environ.get("DSH_PROFILE_DIR", "").strip()
+            if profile_dir:
+                profile = Path(profile_dir).name
+        if not profile and len(available) == 1:
+            profile = available[0]
+        if not profile and "web" in available:
+            profile = "web"
+
+        if not profile:
+            console.print("[red]No dsh profile selected.[/red]")
+            if available:
+                console.print(
+                    f"[yellow]Profiles available: {', '.join(available)}[/yellow]"
+                )
+                console.print("[yellow]Re-run with DSH_PROFILE=<name> set.[/yellow]")
+            else:
+                console.print(
+                    f"[yellow]Is dsh installed? Looked in {profiles_dir}[/yellow]"
+                )
+            return
+
         config_path = profiles_dir / profile / "cordis.patch.yml"
 
-        if not config_path.exists():
-            available = (
-                sorted(
-                    p.name
-                    for p in profiles_dir.iterdir()
-                    if p.is_dir() and (p / "cordis.yml").exists()
-                )
-                if profiles_dir.is_dir()
-                else []
-            )
+        if profile not in available:
             console.print(f"[red]No dsh profile found at {config_path}[/red]")
             if available:
                 console.print(
@@ -2061,7 +2089,7 @@ def install_mcp(
         except ImportError:
             console.print(
                 "[red]PyYAML is required for DeepSeek Harness configuration.\n"
-                "Install it with: pip install pyyaml[/red]"
+                'Install it with: pip install "tacit[dsh]" (or: pip install pyyaml)[/red]'
             )
             raise typer.Exit(code=1)
 
@@ -2073,7 +2101,13 @@ def install_mcp(
         )
 
         try:
-            raw = config_path.read_text(encoding="utf-8")
+            # A profile may have no patch layer yet; dsh treats that as
+            # empty, so start from an empty list instead of failing.
+            raw = (
+                config_path.read_text(encoding="utf-8")
+                if config_path.exists()
+                else ""
+            )
 
             try:
                 data = yaml.safe_load(raw)
