@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from functools import wraps
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import uuid
@@ -144,6 +145,136 @@ class MemoryMCPHandlers:
             "Scope filters memories: entries recorded against other subsystems are "
             "excluded. Retry without scope_hint to read the whole workspace."
         )
+
+    @staticmethod
+    def _exhaustive_fallback(
+        query: str,
+        total: int,
+        project_root: Optional[Path] = None,
+        scope: Optional[List[str]] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build the mandatory five-sub-agent sweep for an empty search.
+
+        ``memory_search`` can only see titles, summaries, tags and vectors. A
+        genuine memory may use different wording, live in a superseded node, or
+        sit in content that was never embedded. Treating an empty page as "this
+        project never learned that" is the expensive failure mode: the agent
+        silently re-proposes a design that was already rejected. So an empty
+        result returns an executable protocol, not a shrug.
+        """
+        prefix = f"No memory entries found matching query: '{query}'"
+        scope_note = ""
+        if scope:
+            scope_note = (
+                f" (Scope [{', '.join(scope)}] filtered this search; retry once without "
+                "scope_hint before concluding anything.)"
+            )
+
+        if total <= 0:
+            return {
+                "count": 0,
+                "results": [],
+                "total_memories": 0,
+                "scope": scope,
+                "diagnostics": diagnostics or {},
+                "fallback": {"strategy": "none", "total": 0},
+                "formatted": (
+                    f"{prefix}{scope_note}.\n"
+                    "The store is empty, so there is genuinely nothing to recall."
+                ),
+            }
+
+        agent_count = min(5, total)
+        chunk_size = max(1, math.ceil(total / agent_count))
+        chunks = []
+        for index in range(agent_count):
+            offset = index * chunk_size
+            if offset >= total:
+                break
+            chunks.append(
+                {
+                    "agent": len(chunks) + 1,
+                    "offset": offset,
+                    "limit": min(chunk_size, total - offset),
+                }
+            )
+
+        project_arg = (
+            f'project="{project_root}"'
+            if project_root is not None
+            else "project=<your absolute workspace root>"
+        )
+        lines = [
+            f"{prefix}{scope_note}.",
+            "",
+            "[TACIT EXHAUSTIVE FALLBACK — MANDATORY BEFORE SAYING 'NOT FOUND']",
+            f"Search is not proof of absence. This store holds {total} memories, and the query "
+            "only inspected titles, summaries, tags and vectors.",
+            "",
+            "Do this now, in order:",
+            "1. Retry `memory_search` once WITHOUT `scope_hint`, and try `memory_grep` on the "
+            "exact symbol, error code or component name.",
+            f"2. If still empty, split the ENTIRE store into {len(chunks)} chunks of about "
+            f"{chunk_size} memories (20% each) and spawn {len(chunks)} sub-agents in parallel. "
+            "Give sub-agent i exactly the matching call below.",
+            "3. Each sub-agent must read its whole chunk and return every node relevant to "
+            "the task, with its full UUID and a short verbatim quote as evidence. Nodes marked "
+            "[RETRACTED] are included so a wrong turn is visible; do not revive them as guidance.",
+            "4. Merge the reports and cite the matching `memory_get(id=...)` nodes. Do not "
+            "conclude 'Tacit has nothing' until every chunk has reported.",
+            "5. If one chunk is still too large for a context window, split that chunk again "
+            "into 20% sub-chunks; never skip a chunk.",
+            "",
+            "Exact sub-agent calls:",
+        ]
+        for chunk in chunks:
+            lines.append(
+                f"  - sub-agent {chunk['agent']}: "
+                f"memory_chronicle(limit={chunk['limit']}, offset={chunk['offset']}, "
+                f"brief=false, content_chars=0, include_superseded=true, "
+                f"include_retracted=true, {project_arg})"
+            )
+
+        if diagnostics:
+            provider = diagnostics.get("embedding_provider") or "none"
+            if diagnostics.get("vector_error"):
+                lines.append(
+                    f"\nVector channel: FAILED ({diagnostics['vector_error']}). Keyword matching "
+                    "was the only channel for this query, which makes the sweep above more "
+                    "important, not less."
+                )
+            elif not diagnostics.get("vector_used") and provider != "none":
+                lines.append(
+                    "\nVector channel: not used for this query; keyword matching only."
+                )
+            elif provider == "none":
+                lines.append(
+                    "\nVector channel: unavailable (GEMINI_API_KEY is not set). Keyword matching "
+                    "was the only channel; the sweep above still covers all content."
+                )
+            if diagnostics.get("stale_embeddings"):
+                lines.append(
+                    f"\nEmbedding index gap: {diagnostics['stale_embeddings']} memories have no "
+                    "usable vector (another model, or never embedded). Run `tacit reindex` to "
+                    "repair them; the sweep above circumvents the gap for this query."
+                )
+
+        return {
+            "count": 0,
+            "results": [],
+            "total_memories": total,
+            "scope": scope,
+            "diagnostics": diagnostics or {},
+            "fallback": {
+                "strategy": "exhaustive_chunked_scan",
+                "total": total,
+                "chunk_size": chunk_size,
+                "agents": len(chunks),
+                "chunks": chunks,
+            },
+            "formatted": "\n".join(lines),
+        }
 
     @_guarded
     def handle_memory_add(
@@ -431,7 +562,9 @@ class MemoryMCPHandlers:
         storage = self._resolve_storage(project)
         # Sanitise whatever the agent passed: absolute paths outside this project
         # are dropped, and with no usable hint the active directory is inferred.
-        scope_hint = resolve_scope_hints(scope_hint, project_root=self._root_for(storage))
+        project_root = self._root_for(storage)
+        scope_hint = resolve_scope_hints(scope_hint, project_root=project_root)
+        diagnostics: Dict[str, Any] = {}
         results = storage.search_hybrid(
             query=query,
             limit=limit,
@@ -441,16 +574,27 @@ class MemoryMCPHandlers:
             tags=tags,
             include_superseded=include_superseded,
             debug=debug,
+            diagnostics=diagnostics,
         )
+        # A hosted key can be present while old rows still carry another model's
+        # vector width. Saying so turns "search feels bad" into an action
+        # (`tacit reindex`) instead of a mystery.
+        try:
+            from ..search.embeddings import EmbeddingService
+
+            if EmbeddingService.get().available:
+                diagnostics["stale_embeddings"] = storage.count_stale_embeddings()
+        except Exception:
+            pass
         if not results:
-            return {
-                "count": 0,
-                "results": [],
-                "scope": scope_hint,
-                "formatted": self._no_match_message(
-                    f"No memory entries found matching query: '{query}'", scope_hint
-                ),
-            }
+            total = storage.get_count()
+            return self._exhaustive_fallback(
+                query=query,
+                total=total,
+                project_root=project_root,
+                scope=scope_hint,
+                diagnostics=diagnostics,
+            )
 
         formatted_lines = [f"Found {len(results)} memory entries for '{query}':\n"]
         items = []
@@ -484,9 +628,24 @@ class MemoryMCPHandlers:
                 entry["provenance"] = item["provenance"]
             items.append(entry)
 
+        if diagnostics.get("vector_error"):
+            formatted_lines.append(
+                "\n[Note] The semantic channel failed for this query, so these are "
+                "keyword-only results. If they look incomplete, use the exhaustive "
+                "five-chunk sweep described by `memory_chronicle`."
+            )
+        elif diagnostics.get("stale_embeddings"):
+            formatted_lines.append(
+                f"\n[Note] {diagnostics['stale_embeddings']} memories have no usable vector "
+                "(another model, or never embedded), so semantic recall is partial. Run "
+                "`tacit reindex`; the exhaustive five-chunk sweep covers the gap meanwhile."
+            )
+
         return {
             "count": len(results),
+            "total_memories": storage.get_count(),
             "results": items,
+            "diagnostics": diagnostics,
             "formatted": "\n".join(formatted_lines),
         }
 
@@ -734,6 +893,7 @@ Merkle Root: {node.merkle_root}
         type: Optional[str] = None,
         timeframe: str = "all",
         limit: int = 100,
+        offset: int = 0,
         brief: bool = False,
         include_superseded: bool = True,
         include_retracted: bool = False,
@@ -745,6 +905,8 @@ Merkle Root: {node.merkle_root}
         The deliberate opposite of ``memory_context``: no ranking, no budget, no
         diversity guard — every memory in the order it was recorded, including
         the superseded ones, for "how did this project get here" analysis.
+        ``offset`` makes the timeline pageable, which is what lets five
+        sub-agents split the store into 20% chunks after a search misses.
         """
         from ..core.chronicle import ChronicleEngine
 
@@ -758,6 +920,7 @@ Merkle Root: {node.merkle_root}
             include_superseded=include_superseded,
             include_retracted=include_retracted,
             limit=limit,
+            offset=offset,
             brief=brief,
             content_chars=content_chars,
         )

@@ -9,9 +9,10 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
-# Offline embedding model cache. Tacit falls back to a project-local cache when
-# the per-user cache is not writable (sandboxes, containers) — that download is
-# ~50MB and must never be committed.
+# Regenerable Tacit artifacts. The store itself (.tacit/memory.db, Markdown
+# memories, config and the project map) is tracked: it is the project's
+# institutional memory and must travel with the code. Only caches and scratch
+# copies are excluded here.
 .tacit/models/
 .tacit/_*/
 

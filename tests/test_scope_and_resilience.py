@@ -1,9 +1,10 @@
 """Coverage for the two failures found when running Tacit inside DeepSeek Harness.
 
-1. **`tacit search` appeared to hang.** fastembed's default cache is the OS temp
-   directory, which the sandbox denies; the download then retried with backoff
-   before failing, so a query blocked for seconds and returned nothing useful.
-   A query must never download, and a missing model must fail in milliseconds.
+1. **`tacit search` could silently degrade.** The old local ONNX model downloaded
+   into a sandboxed/excluded cache, or never loaded at all, so queries quietly
+   returned keyword-only results. Hosted Gemini embeddings remove that failure
+   mode; with no key, search is explicitly keyword-only and an empty result
+   carries the exhaustive-scan protocol.
 
 2. **`scope_hint` was trusted verbatim.** An agent passing an absolute path with
    a trailing separator silently changed ranking, and a bare call with no hint
@@ -11,14 +12,11 @@
 """
 
 import shutil
-import sys
-import types
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from src.search import embeddings as emb
 from src.search.embeddings import EmbeddingService
 from src.utils.scope import (
     infer_scope_from_cwd,
@@ -42,7 +40,7 @@ def tmp_dir():
 
 @pytest.fixture(autouse=True)
 def clean_provider(monkeypatch):
-    for var in ("OPENAI_API_KEY", "GEMINI_API_KEY", "TACIT_EMBED_CACHE", "FASTEMBED_CACHE_PATH"):
+    for var in ("OPENAI_API_KEY", "GEMINI_API_KEY", "TACIT_EMBED_PROVIDER", "TACIT_GEMINI_DIM"):
         monkeypatch.delenv(var, raising=False)
     EmbeddingService.reset()
     yield
@@ -195,104 +193,44 @@ def test_mcp_handlers_stay_pinned_when_cwd_changes(tmp_dir, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# model cache resolution
+# provider resolution: hosted only, no local model
 # ---------------------------------------------------------------------------
 
-class FakeTextEmbedding:
-    """Stands in for fastembed so no model is ever downloaded in tests."""
-
-    calls: list = []
-
-    def __init__(self, model_name, cache_dir=None, local_files_only=False, **kwargs):
-        FakeTextEmbedding.calls.append(
-            {"model": model_name, "cache_dir": cache_dir, "local_files_only": local_files_only}
-        )
-        if local_files_only:
-            raise ValueError("Could not load model from cache")
-
-    def embed(self, batch):  # pragma: no cover - only used when load succeeds
-        raise AssertionError("no model should be loaded in these tests")
-
-
-@pytest.fixture
-def fake_fastembed(monkeypatch):
-    FakeTextEmbedding.calls = []
-    monkeypatch.setitem(sys.modules, "fastembed", types.SimpleNamespace(TextEmbedding=FakeTextEmbedding))
-    return FakeTextEmbedding
-
-
-def test_explicit_cache_override_is_respected(tmp_dir, monkeypatch):
-    target = tmp_dir / "custom-cache"
-    monkeypatch.setenv("TACIT_EMBED_CACHE", str(target))
-
-    assert emb.resolve_cache_dir(tmp_dir) == target
-
-
-def test_cache_falls_back_into_the_project_when_the_user_cache_is_unwritable(tmp_dir, monkeypatch):
-    """Inside a workspace-restricted sandbox only the project directory is writable."""
-    monkeypatch.setattr(emb, "user_cache_dir", lambda: Path("C:/Windows/System32/tacit_nope"))
-    project = tmp_dir / "proj"
-    project.mkdir()
-
-    resolved = emb.resolve_cache_dir(project)
-
-    assert resolved == project / ".tacit" / "models"
-    assert resolved.is_dir()
-
-
-def test_default_cache_is_persistent_not_temp(tmp_dir, monkeypatch):
-    """fastembed's own default is the temp dir, which is exactly what broke."""
-    monkeypatch.setattr(emb, "user_cache_dir", lambda: tmp_dir / "user-cache")
-
-    resolved = emb.resolve_cache_dir(tmp_dir)
-
-    assert resolved == tmp_dir / "user-cache"
-
-
-# ---------------------------------------------------------------------------
-# a query must never download
-# ---------------------------------------------------------------------------
-
-def test_available_does_not_allow_downloads(fake_fastembed, tmp_dir, monkeypatch):
-    monkeypatch.setattr(emb, "resolve_cache_dir", lambda project_root=None: tmp_dir)
+def test_gemini_is_the_default_provider(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyTESTKEY1234567890")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    EmbeddingService.reset()
 
     service = EmbeddingService.get()
+
+    assert service.provider == "gemini"
+    assert service.available is True
+    assert service.dimension == 768
+
+
+def test_openai_requires_an_explicit_opt_in_when_gemini_exists(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyTESTKEY1234567890")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    EmbeddingService.reset()
+
+    assert EmbeddingService.get().provider == "gemini"
+
+    monkeypatch.setenv("TACIT_EMBED_PROVIDER", "openai")
+    EmbeddingService.reset()
+
+    assert EmbeddingService.get().provider == "openai"
+
+
+def test_no_key_is_reported_without_downloading_anything(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    EmbeddingService.reset()
+
+    service = EmbeddingService.get()
+
     assert service.available is False
-
-    assert fake_fastembed.calls, "the model lookup must still be attempted"
-    assert all(call["local_files_only"] is True for call in fake_fastembed.calls), (
-        "a query-time load must be cache-only"
-    )
-
-
-def test_reindex_path_is_allowed_to_download(fake_fastembed, tmp_dir, monkeypatch):
-    monkeypatch.setattr(emb, "resolve_cache_dir", lambda project_root=None: tmp_dir)
-
-    EmbeddingService.get().ensure_local_model(allow_download=True)
-
-    assert fake_fastembed.calls[-1]["local_files_only"] is False
-
-
-def test_describe_explains_why_embeddings_are_unavailable(fake_fastembed, tmp_dir, monkeypatch):
-    monkeypatch.setattr(emb, "resolve_cache_dir", lambda project_root=None: tmp_dir)
-
-    description = EmbeddingService.get().describe()
-
-    assert "unavailable" in description
-    assert str(tmp_dir) in description, "the cache location belongs in the message"
-
-
-def test_missing_model_fails_fast(fake_fastembed, tmp_dir, monkeypatch):
-    """The reported symptom was a multi-second retry storm, not a wrong answer."""
-    import time
-
-    monkeypatch.setattr(emb, "resolve_cache_dir", lambda project_root=None: tmp_dir)
-
-    started = time.perf_counter()
-    EmbeddingService.get().available
-    elapsed = time.perf_counter() - started
-
-    assert elapsed < 1.0
+    assert service.dimension == 0
+    assert "GEMINI_API_KEY" in service.describe()
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +296,6 @@ def test_reindex_reports_rate_limits_instead_of_a_traceback(tmp_dir, monkeypatch
     MemoryStorage(tmp_dir / ".tacit" / "memory.db")
     monkeypatch.setattr(EmbeddingService, "available", property(lambda self: True))
     monkeypatch.setattr(EmbeddingService, "provider", property(lambda self: "gemini"))
-    monkeypatch.setattr(EmbeddingService, "cache_dir", property(lambda self: tmp_dir))
 
     def rate_limited(self, progress=True, force=False):
         raise EmbeddingUnavailable(

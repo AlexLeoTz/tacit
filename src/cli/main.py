@@ -260,34 +260,40 @@ def init(
     if force or not cursor_rule.exists():
         cursor_rule.write_text(rule_content, encoding="utf-8")
 
-    # 3. Check for GEMINI_API_KEY and configure embedding preferences
-    gemini_key = os.environ.get("GEMINI_API_KEY")
-    env_file = target_root / ".env"
-    if not gemini_key and env_file.exists():
-        try:
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                if line.strip().startswith("GEMINI_API_KEY="):
-                    gemini_key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-        except Exception:
-            pass
+    # 3. Resolve the embedding engine. Gemini is the engine Tacit ships with;
+    # there is no offline model to fall back to, so be explicit when the key is
+    # missing instead of pretending semantic search will work. `ensure_directories`
+    # has already loaded the project's .env, so a key kept there is visible here.
+    from ..search.embeddings import EmbeddingService
 
-    embed_provider_msg = (
-        "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold]"
-    )
-    if gemini_key:
-        try:
-            use_gemini = typer.confirm(
-                "\nDetected GEMINI_API_KEY. Would you like Tacit to use Google Gemini for high-precision embeddings? (Selecting 'no' will use local CPU ONNX model)",
-                default=True,
-            )
-            if use_gemini:
-                embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold green]Google Gemini (gemini-embedding-001)[/bold green]"
-            else:
-                os.environ.pop("GEMINI_API_KEY", None)
-                embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold]Local CPU ONNX (bge-small-en-v1.5)[/bold] [dim](Gemini declined)[/dim]"
-        except Exception:
-            embed_provider_msg = "[cyan]Embedding Engine:[/cyan] [bold green]Google Gemini (gemini-embedding-001)[/bold green]"
+    embed_svc = EmbeddingService.get()
+    if embed_svc.available:
+        embed_provider_msg = (
+            "[cyan]Embedding Engine:[/cyan] "
+            f"[bold green]{embed_svc.describe()}[/bold green]"
+        )
+    else:
+        embed_provider_msg = (
+            "[cyan]Embedding Engine:[/cyan] [bold yellow]keyword-only (BM25)[/bold yellow]\n"
+            "[dim]Semantic search needs GEMINI_API_KEY. Get a key at "
+            "https://aistudio.google.com/apikey and export it (or add it to .env), "
+            "then run `tacit reindex`.[/dim]"
+        )
+
+    # A provider can be configured while the existing rows still carry another
+    # model's vectors. Name that instead of letting semantic search quietly
+    # return nothing.
+    stale_hint = ""
+    try:
+        if embed_svc.available:
+            stale_count = storage.count_stale_embeddings()
+            if stale_count:
+                stale_hint = (
+                    f"\n[yellow]{stale_count} memories need re-embedding with the current "
+                    "model.[/yellow] Run [bold cyan]tacit reindex[/bold cyan]."
+                )
+    except Exception:
+        pass
 
     console.print(
         Panel.fit(
@@ -296,11 +302,26 @@ def init(
             f"[dim]Storage Dir:[/dim]  {Config.get_memory_dir(target_root).resolve()}\n"
             f"[dim]Database:[/dim]     {db_path.resolve()}\n"
             f"[dim]Total Memories:[/dim] {count}\n"
-            f"{embed_provider_msg}\n"
+            f"{embed_provider_msg}{stale_hint}\n"
             f"[cyan]Auto-created AI agent rules in `.agents/rules/` and `.cursorrules`[/cyan]",
             border_style="green",
         )
     )
+
+    # The store carries the project's institutional memory, so make sure git does
+    # not exclude it: a clone without .tacit looks identical to a project that
+    # never recorded anything.
+    try:
+        from ..utils.git_tracking import ensure_store_tracked
+
+        git_status = ensure_store_tracked(target_root)
+        if git_status.get("git_repo"):
+            style = "green" if git_status.get("tracked") else "yellow"
+            console.print(f"[{style}]Git tracking:[/{style}] {git_status['message']}")
+        else:
+            console.print(f"[dim]Git tracking:[/dim] {git_status['message']}")
+    except Exception as exc:  # tracking is a safety net, never a reason init fails
+        console.print(f"[yellow]Could not verify git tracking:[/yellow] {exc}")
 
     # Project structure snapshot: opt-in, asked once, stored in the .tacit store
     # so `tacit move` carries it along. Structure and file names only.
@@ -355,7 +376,7 @@ def move(
 
     The store is moved, not copied. A one-line pointer stays at
     ``<root>/.tacit/location`` so nothing else has to change: discovery, the
-    database, the exported Markdown and the model cache all follow it.
+    database, the exported Markdown and the project map all follow it.
     """
     import shutil
 
@@ -604,10 +625,19 @@ def search(
         console.print(Panel.fit(
             "[yellow]Semantic search is unavailable — these are keyword-only results.[/yellow]\n"
             f"[dim]{embed_svc.describe()}[/dim]\n\n"
-            "Prepare the offline model with [bold cyan]tacit reindex[/bold cyan], "
-            "or set [bold cyan]OPENAI_API_KEY[/bold cyan] / [bold cyan]GEMINI_API_KEY[/bold cyan].",
+            "Set [bold cyan]GEMINI_API_KEY[/bold cyan] to enable Gemini embeddings "
+            "(recommended), or [bold cyan]OPENAI_API_KEY[/bold cyan] for the optional provider.\n"
+            "Set the key, then run [bold cyan]tacit reindex[/bold cyan].",
             border_style="yellow",
         ))
+    elif mode == "hybrid":
+        stale = storage.count_stale_embeddings()
+        if stale:
+            console.print(
+                f"[yellow]{stale} memories have no usable vector[/yellow] (another model, "
+                "or never embedded). Semantic recall is partial until you run "
+                "[bold cyan]tacit reindex[/bold cyan]."
+            )
 
     results = storage.search_hybrid(
         query=query,
@@ -624,6 +654,13 @@ def search(
         console.print(
             f"[yellow]No memory entries found matching '{query}'{proj_hint}.[/yellow]"
         )
+        total = storage.get_count()
+        if total:
+            console.print(
+                f"[dim]The store holds {total} memories. Search only ranks titles, summaries,\n"
+                "tags and vectors — an agent should run the exhaustive five-chunk sweep\n"
+                "(`memory_chronicle` with limit/offset) before concluding nothing exists.[/dim]"
+            )
         return
 
     table = Table(
@@ -671,20 +708,13 @@ def reindex(
         help="Rebuild every vector, required after switching embedding provider",
     ),
 ):
-    """Backfill missing dense vector embeddings across all memories in the project database."""
+    """Backfill missing dense vector embeddings, and repair vectors from another model."""
     from ..search.embeddings import EmbeddingService, EmbeddingUnavailable
 
     storage = get_storage(project)
     embed_svc = EmbeddingService.get()
 
-    if not embed_svc.available:
-        # Downloading the model is an explicit maintenance action; a search query
-        # must never block on it.
-        console.print("[dim]Preparing the local ONNX model (first run downloads ~50MB)...[/dim]")
-        embed_svc.ensure_local_model(allow_download=True)
-
     console.print(f"[dim]Embedding provider:[/dim] {embed_svc.describe()}")
-    console.print(f"[dim]Model cache:[/dim] {embed_svc.cache_dir}")
     # Masked fingerprint: the usual cause of a rejected key is a revoked one
     # still exported in the shell that launched this command.
     console.print(f"[dim]Key in use:[/dim] {embed_svc.key_hint()}")
@@ -694,9 +724,10 @@ def reindex(
             Panel.fit(
                 "[bold red]No embedding provider available[/bold red]\n\n"
                 "Semantic search is disabled; queries fall back to keyword matching only.\n\n"
-                "Set [bold cyan]OPENAI_API_KEY[/bold cyan] or [bold cyan]GEMINI_API_KEY[/bold cyan], "
-                "or install the offline model with [bold]pip install fastembed[/bold].\n"
-                "Set [bold cyan]TACIT_EMBED_CACHE[/bold cyan] if the cache directory is not writable.",
+                "Set [bold cyan]GEMINI_API_KEY[/bold cyan] to use Google Gemini "
+                "(recommended: gemini-embedding-001), or [bold cyan]OPENAI_API_KEY[/bold cyan] "
+                "for the optional OpenAI provider.\n"
+                "Get a Gemini key at https://aistudio.google.com/apikey",
                 border_style="red",
             )
         )
@@ -706,10 +737,11 @@ def reindex(
     if stale and not force:
         console.print(
             Panel.fit(
-                f"[yellow]{stale} memories were embedded with a different model.[/yellow]\n"
-                "Their vectors cannot be compared with the current provider, so they are\n"
-                "skipped by semantic search. Rebuild them with:\n\n"
-                "[bold cyan]tacit reindex --force[/bold cyan]",
+                f"[yellow]{stale} memories have no vector, or a vector from a different model.[/yellow]\n"
+                "Rows embedded by another provider cannot be compared with the current one,\n"
+                "so they are skipped by semantic search. Rebuild them with:\n\n"
+                "[bold cyan]tacit reindex --force[/bold cyan]\n\n"
+                "[dim]A plain `tacit reindex` also re-embeds width-mismatched rows now.[/dim]",
                 border_style="yellow",
             )
         )
@@ -1725,6 +1757,11 @@ def chronicle(
         "-n",
         help="Maximum memories to render (0 = the entire history)",
     ),
+    offset: int = typer.Option(
+        0,
+        "--offset",
+        help="Memories to skip before rendering; use with --limit to page the timeline",
+    ),
     brief: bool = typer.Option(
         False, "--brief", "-b", help="One line per memory instead of full content"
     ),
@@ -1767,6 +1804,7 @@ def chronicle(
         include_superseded=not active_only,
         include_retracted=retracted,
         limit=limit,
+        offset=offset,
         brief=brief,
         content_chars=content_chars,
     )
@@ -1928,6 +1966,17 @@ def mcp(
         )
     else:
         Config.ensure_directories(pinned_root)
+        try:
+            from ..utils.git_tracking import ensure_store_tracked
+
+            tracking = ensure_store_tracked(pinned_root)
+            if tracking.get("git_repo") and not tracking.get("tracked"):
+                stderr_console.print(
+                    f"[yellow]Tacit store is not fully tracked by git:[/yellow] "
+                    f"{tracking['message']}"
+                )
+        except Exception:
+            pass
         stderr_console.print(
             f"[dim]Tacit MCP serving workspace:[/dim] {pinned_root.resolve()}"
         )

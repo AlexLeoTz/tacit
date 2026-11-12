@@ -216,15 +216,3 @@ def test_absolute_pointer_paths_are_accepted(project, tmp_dir):
     (project / ".tacit" / "location").write_text(str(external), encoding="utf-8")
 
     assert Config.get_memory_dir(project) == external.resolve()
-
-
-def test_model_cache_follows_a_relocated_store(project, monkeypatch):
-    """The offline model cache lives under the store, so it must move with it."""
-    from src.search import embeddings as emb
-
-    run("move", "agent-memory", "--project", str(project))
-    monkeypatch.setattr(emb, "user_cache_dir", lambda: Path("C:/Windows/System32/tacit_nope"))
-
-    resolved = emb.resolve_cache_dir(project)
-
-    assert resolved == project / "agent-memory" / ".tacit" / "models"

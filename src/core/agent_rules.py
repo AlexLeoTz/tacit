@@ -33,9 +33,22 @@ Every file in the map has a **table row**: lines of code, size, language, conten
 * **When you learn what an undescribed file does, record it immediately**, even outside the pending list — it costs one line and saves the next session a full read.
 * From a terminal: `tacit files --pending`, `tacit files --set <path> --description "..."`, `tacit files --refresh` (recompute lines/hash), `tacit files --stats`, `tacit files --prune`.
 
+## When `memory_search` Returns Nothing: Exhaustive Chunked Recall
+* **An empty search is NOT proof that the memory does not exist.** `memory_search` ranks titles, summaries, tags and vectors; it cannot see every wording of an idea, and a relevant node may be superseded or have content the index never embedded.
+* **`memory_search` returns an executable fallback when it finds nothing.** Its response names `total_memories` and gives the exact `offset`/`limit` for five ~20% chunks. Run that protocol; do not paraphrase it away.
+* **The protocol is mandatory, not advisory:**
+  1. Retry `memory_search` once **without `scope_hint`** (scope is a filter and may have emptied the result). Try `memory_grep` on the exact symbol, error code or component name.
+  2. Split the **entire** store into five chunks of `ceil(total / 5)` memories (20% each) and spawn **five sub-agents in parallel**.
+  3. Give sub-agent *i* exactly: `memory_chronicle(limit=<chunk>, offset=<i * chunk>, brief=false, content_chars=0, include_superseded=true, include_retracted=true, project=<workspace root>)`.
+  4. Each sub-agent reads its whole chunk and returns every relevant node with its **full UUID** and a short verbatim quote as evidence.
+  5. Merge the five reports and cite `memory_get(id=...)` for each candidate. If a chunk is still too large, split that chunk again into 20% sub-chunks; never skip one.
+* **Never tell the user "Tacit has nothing" until all five chunks have reported.** The expensive failure is silently re-proposing a design this project already rejected, or re-debugging an error whose root cause is already recorded.
+* **This matters most for** "have we tried this before?", "why is it built this way?", and any query where the first answer looks suspiciously empty on a project with history.
+
 ## Deep History: `memory_chronicle`
 * **Use `memory_chronicle` when the task is to understand the project's history**, not its current state: "why is it built this way", "have we tried this before", "summarise every decision since day one". It returns **every** memory oldest-first, including superseded ones, with no ranking and no budget.
 * **It is large by design.** Start with `brief=true` to read the timeline cheaply, then re-read the specific window or category you care about (`type`, `timeframe`, `scope_hint`). Only pull full content (`brief=false`, `limit=0`) when you genuinely need to reason over the whole history.
+* **`limit` and `offset` page it.** A whole-history read can exceed a context window: fetch 20% at a time (`limit=ceil(total/5)`, `offset=i*ceil(total/5)`), in parallel sub-agents when the count is large.
 * **`memory_context` and `memory_chronicle` are complements, not substitutes**: the briefing tells you what to obey now, the chronicle tells you how the codebase arrived there.
 
 ## Choose Your Workspace (`project`)
@@ -133,7 +146,7 @@ Confusable pairs — resolve them this way:
 ## Mandatory Agent Workflow:
 1. **Session Bootstrapping**: At session start or when beginning a new task, call `memory_context(project=<your workspace root>)` to load relevance-ranked decisions, active hacks, and solved errors into your context. Add `scope_hint` when the task is confined to one subsystem. **Carefully read any pinned memories at the end of the briefing (`Pinned by DEV`)**, as they are important tacit knowledge pinned by DEV.
 2. **Orient and fill the file table**: call `project_structure` for the map, then `project_files_pending`; if it lists files, describe them in one batched `project_files_update` call before starting the task (see *The File Table* above).
-3. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated. Use `memory_chronicle` when the question is historical rather than current.
+3. **Pre-Decision Validation (Check Before Planning)**: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST query Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated. **If `memory_search` returns nothing, run the exhaustive five-chunk protocol above before concluding the knowledge is absent** — the fallback response contains the exact calls. Use `memory_chronicle` when the question is historical rather than current.
 4. **Causal Lineage & Taxonomy**: When calling `memory_add` or `memory_add_batch`, always specify:
    - `project`: Your workspace root, so the entry lands in this repository's store.
    - `tags`: At least 2 descriptive keywords (e.g. ['auth', 'jwt', 'security']).

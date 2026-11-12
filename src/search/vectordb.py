@@ -33,7 +33,7 @@ def enable_vec(db) -> bool:
         db.enable_load_extension(False)
         db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories
-            USING vec0(memory_id text primary key, embedding float[384])
+            USING vec0(memory_id text primary key, embedding float[768])
         """)
         return True
     except Exception:

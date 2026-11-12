@@ -574,21 +574,14 @@ class MemoryStorage:
             finally:
                 conn.close()
 
-    def get_chronological(
-        self,
-        include_superseded: bool = True,
-        include_retracted: bool = False,
-        memory_type: Optional[str] = None,
-        since: Optional[float] = None,
-        limit: Optional[int] = None,
-    ) -> List[MemoryNode]:
-        """Every memory oldest-first, for whole-history analysis.
-
-        Unlike :meth:`get_active_memories` this keeps superseded and (optionally)
-        retracted nodes, because "how did this project get here" needs the
-        decisions that were later replaced. Newest-last ordering is the point:
-        a chronicle is read as a timeline, not a ranking.
-        """
+    @staticmethod
+    def _chronological_filters(
+        include_superseded: bool,
+        include_retracted: bool,
+        memory_type: Optional[str],
+        since: Optional[float],
+    ) -> tuple[List[str], List[Any]]:
+        """Build the shared WHERE clause for chronicle reads and counts."""
         conditions: List[str] = []
         params: List[Any] = []
 
@@ -603,18 +596,72 @@ class MemoryStorage:
         if since is not None:
             conditions.append("timestamp >= ?")
             params.append(float(since))
+        return conditions, params
+
+    def get_chronological(
+        self,
+        include_superseded: bool = True,
+        include_retracted: bool = False,
+        memory_type: Optional[str] = None,
+        since: Optional[float] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[MemoryNode]:
+        """Every memory oldest-first, for whole-history analysis.
+
+        Unlike :meth:`get_active_memories` this keeps superseded and (optionally)
+        retracted nodes, because "how did this project get here" needs the
+        decisions that were later replaced. Newest-last ordering is the point:
+        a chronicle is read as a timeline, not a ranking.
+
+        ``offset`` exists for the exhaustive-search fallback: an agent that got no
+        result from ``memory_search`` splits the store into five slices and has
+        sub-agents read one slice each instead of concluding "not found".
+        """
+        conditions, params = self._chronological_filters(
+            include_superseded, include_retracted, memory_type, since
+        )
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f"SELECT * FROM memories {where} ORDER BY timestamp ASC"
+        sql = f"SELECT * FROM memories {where} ORDER BY timestamp ASC, id ASC"
         if limit:
             sql += " LIMIT ?"
             params.append(int(limit))
+            if offset:
+                sql += " OFFSET ?"
+                params.append(max(0, int(offset)))
+        elif offset:
+            # SQLite requires LIMIT before OFFSET; -1 means "no limit".
+            sql += " LIMIT -1 OFFSET ?"
+            params.append(max(0, int(offset)))
 
         with self._lock:
             conn = self._get_connection()
             try:
                 rows = conn.execute(sql, params).fetchall()
                 return [MemoryNode.from_dict(dict(row)) for row in rows]
+            finally:
+                conn.close()
+
+    def count_chronological(
+        self,
+        include_superseded: bool = True,
+        include_retracted: bool = False,
+        memory_type: Optional[str] = None,
+        since: Optional[float] = None,
+    ) -> int:
+        """Total memories matching the chronicle filters, before pagination."""
+        conditions, params = self._chronological_filters(
+            include_superseded, include_retracted, memory_type, since
+        )
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM memories {where}", params
+                ).fetchone()
+                return int(row[0]) if row else 0
             finally:
                 conn.close()
 
@@ -1088,6 +1135,7 @@ class MemoryStorage:
         tags: Optional[List[str]] = None,
         include_superseded: bool = False,
         debug: bool = False,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Execute hybrid search combining BM25 keyword matching and dense vector similarity via RRF."""
         with self._lock:
@@ -1104,30 +1152,37 @@ class MemoryStorage:
                     tags=tags,
                     include_superseded=include_superseded,
                     debug=debug,
+                    diagnostics=diagnostics,
                 )
             finally:
                 conn.close()
 
     def count_stale_embeddings(self) -> int:
-        """Count memories whose stored vector has a different width than the active provider.
+        """Count memories whose vector is missing or has the wrong width.
 
-        Vectors from a different model are not comparable, so these rows are
-        skipped by search until they are re-embedded. Surfacing the count lets
-        `tacit reindex --force` explain *why* semantic search got worse.
+        Vectors from a different model are not comparable, so rows embedded by a
+        previous provider (or never embedded at all) are skipped by semantic
+        search until they are re-embedded. Surfacing the count lets
+        `tacit reindex` explain *why* semantic search got worse, and lets
+        `memory_search` tell an agent that its keyword-only answer is incomplete.
         """
         from ..search.embeddings import EmbeddingService
 
         dimension = EmbeddingService.get().dimension
-        if dimension <= 0:
-            return 0
-        expected_bytes = dimension * 4
         with self._lock:
             conn = self._get_connection()
             try:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL AND LENGTH(embedding) != ?",
-                    (expected_bytes,),
-                ).fetchone()
+                if dimension <= 0:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM memories WHERE embedding IS NULL"
+                    ).fetchone()
+                else:
+                    expected_bytes = dimension * 4
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM memories "
+                        "WHERE embedding IS NULL OR LENGTH(embedding) != ?",
+                        (expected_bytes,),
+                    ).fetchone()
                 return int(row[0]) if row else 0
             except Exception:
                 return 0
@@ -1137,9 +1192,11 @@ class MemoryStorage:
     def reindex_all(self, progress: bool = True, force: bool = False) -> Tuple[int, int]:
         """Backfill vector embeddings, or rebuild every vector when ``force`` is set.
 
-        ``force`` is required after switching embedding providers: existing rows
-        already have an ``embedded_at`` value, but their vectors come from a
-        different model and cannot be compared with new queries.
+        Without ``force`` this still re-embeds rows whose stored vector has the
+        wrong width for the active provider. That matters after switching engines
+        (Gemini's 768 dims replace OpenAI's 1536): those rows already have an
+        ``embedded_at`` value, so a pure "missing" backfill would silently leave
+        semantic search crippled forever.
         """
         from ..search.embeddings import EmbeddingService
         from ..search.hybrid import build_embed_text
@@ -1149,12 +1206,22 @@ class MemoryStorage:
         if not embed_svc.available:
             return 0, 0
 
+        dimension = embed_svc.dimension
         with self._lock:
             conn = self._get_connection()
             try:
-                condition = "" if force else "WHERE embedded_at IS NULL"
+                if force:
+                    condition = ""
+                    params: List[Any] = []
+                else:
+                    condition = "WHERE embedded_at IS NULL OR embedding IS NULL"
+                    params = []
+                    if dimension > 0:
+                        condition += " OR LENGTH(embedding) != ?"
+                        params.append(dimension * 4)
                 rows = conn.execute(
-                    f"SELECT id, title, tags, summary, timestamp FROM memories {condition}"
+                    f"SELECT id, title, tags, summary, timestamp FROM memories {condition}",
+                    params,
                 ).fetchall()
                 total = len(rows)
                 if total == 0:

@@ -111,7 +111,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_search",
-        "description": "Search the persistent memory store via SQLite full-text index with optional category filtering.",
+        "description": "Search the persistent memory store via hybrid BM25 + dense vector RRF (Gemini embeddings when GEMINI_API_KEY is set). An empty result is NOT proof of absence: it returns a mandatory five-chunk `memory_chronicle` sweep protocol that you must run (five sub-agents, ~20% of the store each) before telling the user nothing was recorded.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -309,7 +309,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_chronicle",
-        "description": "Return the project's ENTIRE memory history in chronological order (oldest first), for deep analysis of how the project got here. Nothing is ranked, budgeted or deduped, and superseded decisions are included. Use brief=true for a one-line-per-memory timeline and limit=0 for everything.",
+        "description": "Return the project's ENTIRE memory history in chronological order (oldest first), for deep analysis of how the project got here. Nothing is ranked, budgeted or deduped, and superseded decisions are included. Use brief=true for a one-line-per-memory timeline and limit=0 for everything. `offset` pages through the timeline: after an empty memory_search, spawn five sub-agents and give each one a 20% slice via limit=ceil(total/5) and offset=i*ceil(total/5).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -332,6 +332,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "integer",
                     "default": 100,
                     "description": "Maximum memories to render; 0 means the entire history.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Number of memories to skip before rendering. Use with `limit` to page the timeline in chunks (e.g. limit=12, offset=24).",
                 },
                 "brief": {
                     "type": "boolean",

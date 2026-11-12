@@ -427,6 +427,17 @@ class Config:
         memory_dir = cls.get_memory_dir(root)
         export_dir = cls.get_export_dir(root)
 
+        # The project's own .env is the natural place to keep GEMINI_API_KEY, and
+        # `tacit init` already looks there. Loading it here makes that promise
+        # true for every later command (the module-level load_dotenv() searches
+        # from the installed package, not from the user's workspace).
+        try:
+            project_env = Path(root) / ".env"
+            if project_env.is_file():
+                load_dotenv(project_env, override=False)
+        except Exception:
+            pass
+
         memory_dir.mkdir(parents=True, exist_ok=True)
         export_dir.mkdir(parents=True, exist_ok=True)
 

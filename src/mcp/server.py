@@ -116,6 +116,11 @@ def create_mcp_server(
 
         `scope_hint` filters the search to the files/directories you name.
         `project` selects the workspace (pass your workspace root).
+
+        An empty result is NOT proof that the memory does not exist. The response
+        then contains a mandatory fallback protocol: split the whole store into
+        five ~20% chunks and run `memory_chronicle(limit=..., offset=...)` from
+        five sub-agents before concluding "not found".
         """
         res = handlers.handle_memory_search(
             query=query,
@@ -229,13 +234,16 @@ def create_mcp_server(
         "deduped, and superseded decisions are included because a replaced "
         "decision is part of the reasoning history. Use `brief=true` for a "
         "one-line-per-memory timeline, `limit=0` for everything, and "
-        "`type`/`timeframe`/`scope_hint` to narrow it."
+        "`type`/`timeframe`/`scope_hint` to narrow it. `offset` pages the "
+        "timeline: after an empty memory_search, split the store into five ~20% "
+        "chunks with limit=ceil(total/5) and offset=i*ceil(total/5)."
     ))
     def memory_chronicle(
         scope_hint: Optional[List[str]] = None,
         type: Optional[str] = None,
         timeframe: str = "all",
         limit: int = 100,
+        offset: int = 0,
         brief: bool = False,
         include_superseded: bool = True,
         include_retracted: bool = False,
@@ -248,6 +256,7 @@ def create_mcp_server(
             type=type,
             timeframe=timeframe,
             limit=limit,
+            offset=offset,
             brief=brief,
             include_superseded=include_superseded,
             include_retracted=include_retracted,
@@ -387,7 +396,8 @@ def create_mcp_server(
             "(directories and file names, with any stored per-file gists) instead of exploring the tree file by file. "
             "Use `refresh=true` only after files were added or renamed. When you work out what a file does, "
             "record it with `project_gist(path=..., gist=...)` so the next session inherits that knowledge.\n\n"
-            "2. PRE-DECISION VALIDATION: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST search Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.\n\n"
+            "2. PRE-DECISION VALIDATION: Before proposing, planning, or implementing any architectural change, library addition, refactor, or configuration change, you MUST search Tacit (`memory_search` or `memory_context`) to verify whether that decision is allowed, if specific constraints apply, or if that approach was previously tried and invalidated.\n"
+            "2b. EMPTY SEARCH IS NOT ABSENCE: A `memory_search` with no results returns a mandatory fallback. Retry once without `scope_hint`, try `memory_grep` on the literal symbol/error, then split the WHOLE store into five ~20% chunks and spawn five sub-agents, each running `memory_chronicle(limit=ceil(total/5), offset=i*ceil(total/5), brief=false, content_chars=0, include_superseded=true, include_retracted=true, project=...)`. Merge their reports with UUIDs and verbatim evidence before you say Tacit has nothing. Never skip this sweep on 'have we tried this before?' or 'why is it like this?' questions.\n\n"
             "3. TAXONOMY & CAUSAL LINEAGE: When calling `memory_add` or `memory_add_batch`, always provide:\n"
             "   - `tags`: At least 2 specific keywords (e.g. ['auth', 'jwt', 'security']).\n"
             "   - `scope`: Subsystem or directory path affected (e.g. ['/api/auth']).\n"

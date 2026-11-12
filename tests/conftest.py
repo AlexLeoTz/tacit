@@ -17,6 +17,7 @@ Two independent layers guard against that:
    tests that monkeypatch the registry themselves.
 """
 
+import hashlib
 import os
 import re
 import shutil
@@ -61,8 +62,9 @@ def no_writes_outside_the_workspace():
     the only trace was a changed timestamp on a file nobody was looking at —
     weeks of accumulated junk registry entries in the worst case.
 
-    Only the cross-project registry is checked, and only its mtime/size, so a
-    concurrently running `tacit` command cannot be confused with a test write.
+    Only the cross-project registry is checked, and only its *content*, so a
+    concurrent `tacit` process that rewrites the same entries (for example an MCP
+    server restarted by an editor) cannot be confused with a test write.
     """
     real_registry = Path.home() / ".gemini" / "config" / "tacit_projects.json"
     # The repository's own store is tracked in git; a test that opens it changes a
@@ -72,10 +74,9 @@ def no_writes_outside_the_workspace():
 
     def snapshot(path):
         try:
-            stat = path.stat()
+            return hashlib.sha256(path.read_bytes()).hexdigest()
         except OSError:
             return None
-        return (stat.st_mtime, stat.st_size)
 
     before = (snapshot(real_registry), snapshot(repo_store))
     yield

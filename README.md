@@ -15,10 +15,11 @@
 
 Every new chat starts from zero. The model can write code, but it does not know the workaround you added for a library quirk, the deploy command that actually works, or why last month's approach was abandoned. So you re-explain it — and if you forget, the agent "cleans up" your workaround and the bug comes back.
 
-**Tacit is a local memory layer that fixes this.** It stores distilled engineering knowledge — decisions, hacks, constraints, commands, resolved errors — in your repo, and hands it back to the agent at the start of every session. No cloud, no accounts: one SQLite file inside your project.
+**Tacit is a local memory layer that fixes this.** It stores distilled engineering knowledge — decisions, hacks, constraints, commands, resolved errors — in your repo, and hands it back to the agent at the start of every session. The memory itself is a SQLite store inside your project; embeddings use the Gemini API, so an internet connection and a `GEMINI_API_KEY` are needed for semantic search (keyword search works without one).
 
 ```bash
 pip install -e .                 # from a clone
+export GEMINI_API_KEY="..."     # https://aistudio.google.com/apikey
 tacit install-mcp --client claude-code   # or cursor / antigravity / deepseek-harness
 cd /path/to/your/project && tacit init
 ```
@@ -37,7 +38,9 @@ That's it. From then on your agent briefs itself before it starts work, and reco
 
 **Scope that actually filters.** Tell it you are working in `backend/app` and you get `backend/app` memories. Not "mostly", not "boosted": other subsystems are excluded, and project-wide knowledge is always included. Memories from another repository cannot appear at all.
 
-**Search that respects the graph.** Hybrid BM25 + embeddings fused by RRF, then weighted by authority. Titles, tags and summaries are embedded — never full content — which is why the agent rules insist on specific titles.
+**Search that respects the graph.** Hybrid BM25 + Gemini embeddings fused by RRF, then weighted by authority. Titles, tags and summaries are embedded — never full content — which is why the agent rules insist on specific titles. An empty search is treated as a signal to scan the whole store in chunks, never as proof that the memory does not exist.
+
+**Memories that travel with the code.** `tacit init` (and every MCP startup) makes sure git does not ignore `.tacit`: it appends a managed `.gitignore` block and stages the store once. Clone the repository on another machine and the decisions are there — only the regenerable embedding cache stays untracked.
 
 ---
 
@@ -50,8 +53,8 @@ git clone https://github.com/AlexLeoTz/tacit.git
 cd tacit
 pip install -e .
 
-# Optional: install offline local embedding model (ONNX)
-pip install -e ".[local]"
+# Semantic search uses Google Gemini embeddings
+export GEMINI_API_KEY="..."   # https://aistudio.google.com/apikey
 ```
 
 > Updating later: `tacit update` detects an editable checkout and updates it in place (`git pull` + `pip install -e .`). Confirm with `tacit --version`, which prints the version *and* the directory the running code came from.
@@ -88,7 +91,9 @@ cd /path/to/my-project
 tacit init
 ```
 
-This creates `.tacit/` (database + config), writes agent rules into `.agents/rules/tacit.md` and `.cursorrules`, and asks whether to keep a project-structure snapshot.
+This creates `.tacit/` (database + config), writes agent rules into `.agents/rules/tacit.md` and `.cursorrules`, asks whether to keep a project-structure snapshot, and verifies that `.tacit` is tracked by git. If a template `.gitignore` ignores dot-directories or `*.db`, Tacit adds a managed block that re-includes the store while keeping its embedding cache and SQLite WAL files out. Commit `.tacit` with your code so a fresh clone keeps every memory.
+
+If `GEMINI_API_KEY` is not set, initialization still succeeds, but search is keyword-only until you set the key and run `tacit reindex`.
 
 **4. Optional: the dashboard**
 
@@ -140,9 +145,9 @@ The deep end. Skip it unless you are changing Tacit or debugging it.
 |---|---|---|
 | `memory_add` | Record one immutable memory. `scope` is mandatory in practice — it is the filter every later read applies. | `content`, `type`, `title`, `summary`, `tags`, `scope`, `impact`, `parents`, `supersedes`, `project` |
 | `memory_add_batch` | Record several related memories atomically (`$prev` links them). | `entries`, `project` |
-| `memory_search` | Hybrid search, scope-filtered, ranked relevance × authority. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `project` |
+| `memory_search` | Hybrid BM25 + Gemini-embedding search, scope-filtered, ranked relevance × authority. An empty result returns a mandatory five-chunk sweep protocol. | `query`, `type`, `tags`, `limit`, `mode`, `scope_hint`, `project` |
 | `memory_context` | The briefing. | `budget`, `timeframe`, `scope_hint`, `project` |
-| `memory_chronicle` | Full history, oldest first, superseded included. | `brief`, `limit` (0 = all), `type`, `timeframe`, `scope_hint`, `project` |
+| `memory_chronicle` | Full history, oldest first, superseded included; `offset` pages it in chunks. | `brief`, `limit` (0 = all), `offset`, `type`, `timeframe`, `scope_hint`, `project` |
 | `memory_get` | One memory by exact UUID, with lineage banners. | `node_id`, `project` |
 | `memory_grep` | Literal substring match over titles and summaries. | `keyword`, `type`, `limit`, `scope_hint`, `project` |
 | `memory_recent` | Chronological recent memories. | `days`, `limit`, `scope_hint`, `project` |
@@ -161,6 +166,19 @@ Plus one prompt, `tacit-instructions`, carrying the same rules the CLI writes in
 * **`scope_hint` filters.** Only memories recorded against those paths — plus project-wide memories — are returned. Omitting it reads the whole workspace. An empty answer names the scope that emptied it, so a wrong scope is never mistaken for missing knowledge.
 * **`project` names the workspace.** One Tacit MCP server can serve several workspaces; pass your workspace root on every call. Without it, the call falls back to the directory the server was launched in.
 * **Tacit never invents a store.** If the launch directory is a container (home, drive root, system or temp folder) or has no project marker (`.tacit`, `.git`, `pyproject.toml`, `package.json`), `tacit mcp` refuses to create a store there and reports it rather than letting one store answer for every workspace underneath.
+
+### When search comes back empty, scan — do not conclude
+
+`memory_search` ranks titles, summaries, tags and vectors; it cannot prove that a memory is absent. A miss can mean different wording, a superseded node, or content that was never embedded. So an empty result is not a shrug: it returns the store's total size and an executable protocol.
+
+The agent must:
+
+1. retry once without `scope_hint`, and try `memory_grep` on the literal symbol or error code;
+2. split the **entire** store into five chunks of ~20% (`limit = ceil(total / 5)`) and spawn five sub-agents;
+3. give sub-agent *i* `memory_chronicle(limit=<chunk>, offset=<i * chunk>, brief=false, content_chars=0, include_superseded=true, include_retracted=true, project=<root>)`;
+4. merge the five reports, citing UUIDs and verbatim evidence; only then may it say no memory exists.
+
+This is deliberately expensive. The alternative failure — silently re-proposing an approach the project already rejected — is far more expensive.
 
 ## How ranking works
 
@@ -186,10 +204,11 @@ Token budget comes from `TACIT_TOKEN_BUDGET` (default 2000): the top slice is re
 ## Multi-project and the file table
 
 * Every project keeps its own database at `<project-root>/.tacit/memory.db`; the root is discovered from `.tacit`, `.git`, `pyproject.toml` or `package.json`.
+* **The store is tracked.** `tacit init` and MCP startup append a managed `.gitignore` block that re-includes `.tacit`, and stage the store the first time. Commit it with the code; without it, a clone starts from zero memories. The embedding cache and SQLite WAL files remain ignored.
 * A workspace root may hold several repositories (`backend/` + `frontend/`): they are discovered by looking for `.git`, or pinned with `tacit structure --set-repos backend,frontend`.
 * Container directories — and directories with no project marker at all — are never treated as a project root, so unrelated workspaces cannot end up sharing one store. `tacit init` is the one command that may create a project in a plain directory.
 * `tacit projects` lists every workspace registered on the machine.
-* `tacit move <subfolder>` relocates a store (database, exports and model cache together) and leaves a pointer at `<root>/.tacit/location`, so nothing else changes.
+* `tacit move <subfolder>` relocates a store (database, exports and Markdown together) and leaves a pointer at `<root>/.tacit/location`, so nothing else changes. Run `tacit init` again (or restart `tacit mcp`) to rewrite the managed gitignore block for the new path.
 
 **The file table.** `tacit init` can keep a structure snapshot of the workspace: directory and file **names only, never source code**, plus one row of metadata per file — lines of code, size, language, content hash, a compact description, and who last updated it and when. Agents read it with `project_structure`, fill missing rows with `project_files_pending` + `project_files_update`, and refresh rows after editing a file; a row whose hash no longer matches the file is reported as stale. Dependency trees, build output and caches are skipped; dotfiles such as `.env` are kept, because they are part of the layout.
 
@@ -197,11 +216,15 @@ Token budget comes from `TACIT_TOKEN_BUDGET` (default 2000): the top slice is re
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENAI_API_KEY` | — | `text-embedding-3-small` (1536-dim). Highest-priority embeddings. |
-| `GEMINI_API_KEY` | — | `gemini-embedding-001` (768-dim). Used when no OpenAI key is set. |
+| `GEMINI_API_KEY` | — | **Recommended.** Google Gemini embeddings (`gemini-embedding-001`, 768-dim). Without it, search is keyword-only. |
+| `OPENAI_API_KEY` | — | Optional alternative: `text-embedding-3-small` (1536-dim). Gemini wins when both keys are set unless `TACIT_EMBED_PROVIDER=openai`. |
+| `TACIT_EMBED_PROVIDER` | auto | Force `gemini` or `openai` when both keys are present. |
+| `TACIT_GEMINI_MODEL` | `gemini-embedding-001` | Gemini embedding model override. |
+| `TACIT_GEMINI_DIM` | `768` for `gemini-embedding-*` | Output dimensionality (128–3072). Changing it requires `tacit reindex --force`. |
 | `TACIT_OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI model override. |
-| `TACIT_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Local ONNX model (only when no API key is set). |
-| `TACIT_EMBED_CACHE` | per-user cache | Where the ONNX model is stored; falls back to `<project>/.tacit/models` when the default is not writable. |
+| `TACIT_EMBED_BATCH_SIZE` | `20` | Items per remote embedding request. |
+| `TACIT_EMBED_MIN_INTERVAL` | `2.0` | Minimum seconds between remote embedding requests. |
+| `TACIT_VECTOR_MIN_SIMILARITY` | `0.30` | Minimum cosine similarity for a vector hit. |
 | `TACIT_TOKEN_BUDGET` | `2000` | Briefing token budget. |
 | `TACIT_PROJECT` | CWD | Pin the workspace, overriding directory discovery. |
 | `TACIT_HOME` | `~/.gemini/config` | Where the cross-project registry and update cache/log live. Set it to keep that state elsewhere (portable installs, tests, containers). |

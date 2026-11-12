@@ -7,9 +7,9 @@ import pytest
 
 from src.core.memory_node import MemoryNode
 from src.core.storage import MemoryStorage
-from src.search.embeddings import EmbeddingService, QUERY_PREFIX
+from src.search.embeddings import EmbeddingService
 from src.search.vectordb import normalize, serialize_f32, deserialize_f32
-from src.search.hybrid import clean_query, rrf, build_embed_text
+from src.search.hybrid import bm25_search, clean_query, rrf, build_embed_text
 
 
 @pytest.fixture
@@ -119,6 +119,109 @@ def test_hybrid_search_end_to_end(temp_storage):
     res_scoped = temp_storage.search_hybrid("security", scope_hint=["src/api/auth.py"], limit=5)
     assert len(res_scoped) >= 1
     assert res_scoped[0]["node"].id == "auth_jwt_node"
+
+
+def test_bm25_or_terms_recall_a_natural_language_question(temp_storage):
+    """The reported failure: one absent word used to zero the whole result.
+
+    FTS5 treats juxtaposed terms as AND, so appending `*` to
+    "why did we choose async db sessions" searched the literal phrase and
+    returned nothing. Terms are OR-ed now, and BM25 ranks the better matches.
+    """
+    temp_storage.add_memory(
+        MemoryNode(
+            id="async-note",
+            title="Async DB sessions",
+            summary="Switched the ORM to async sessions",
+            content="Async database sessions for the API.",
+            type="decision",
+            tags=["async", "database"],
+            status="active",
+        )
+    )
+    conn = temp_storage._get_connection()
+    try:
+        ids = bm25_search(conn, "why did we choose async db sessions")
+    finally:
+        conn.close()
+
+    assert "async-note" in ids
+
+
+def test_tags_filter_is_applied(temp_storage):
+    """`memory_search(tags=[...])` used to ignore the tags argument entirely."""
+    temp_storage.add_memory(
+        MemoryNode(
+            id="tagged",
+            title="JWT rotation",
+            summary="Rotate JWT refresh tokens",
+            content="Rotate tokens.",
+            type="security",
+            tags=["jwt", "security"],
+            status="active",
+        )
+    )
+    temp_storage.add_memory(
+        MemoryNode(
+            id="untagged",
+            title="JWT debugging",
+            summary="Debug JWT failures",
+            content="Debug tokens.",
+            type="error",
+            tags=["unrelated"],
+            status="active",
+        )
+    )
+    conn = temp_storage._get_connection()
+    try:
+        ids = bm25_search(conn, "JWT", tags=["security"])
+    finally:
+        conn.close()
+
+    assert ids == ["tagged"]
+
+
+def test_reindex_without_force_also_repairs_wrong_width_vectors(temp_storage, monkeypatch):
+    """After switching providers, `tacit reindex` must re-embed stale widths.
+
+    A plain backfill used to select only `embedded_at IS NULL`, so rows embedded
+    by the previous provider kept their old width forever and semantic search
+    silently skipped them.
+    """
+    node = MemoryNode(
+        id="stale-width",
+        title="Old provider vector",
+        summary="Embedded at 4 dimensions",
+        content="A row from another model.",
+        type="decision",
+        tags=["stale"],
+        status="active",
+    )
+    temp_storage.add_memory(node)
+
+    conn = temp_storage._get_connection()
+    conn.execute(
+        "UPDATE memories SET embedding = ?, embedded_at = 1 WHERE id = 'stale-width'",
+        (serialize_f32([0.1] * 4),),
+    )
+    conn.commit()
+    conn.close()
+
+    service = EmbeddingService.get()
+    monkeypatch.setattr(EmbeddingService, "available", property(lambda self: True))
+    monkeypatch.setattr(EmbeddingService, "dimension", property(lambda self: 8))
+    monkeypatch.setattr(
+        service, "embed_documents", lambda texts: [[0.5] * 8 for _ in texts], raising=False
+    )
+
+    done, total = temp_storage.reindex_all(progress=False)
+
+    assert total == 1
+    assert done == 1
+    conn = temp_storage._get_connection()
+    blob = conn.execute("SELECT embedding FROM memories WHERE id = 'stale-width'").fetchone()[0]
+    conn.close()
+    assert len(deserialize_f32(blob)) == 8
 
 
 def test_reindex_all_backfill(temp_storage, monkeypatch):

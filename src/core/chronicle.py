@@ -59,26 +59,24 @@ class ChronicleEngine:
         include_superseded: bool = True,
         include_retracted: bool = False,
         limit: int = DEFAULT_LIMIT,
+        offset: int = 0,
         brief: bool = False,
         content_chars: int = DEFAULT_CONTENT_CHARS,
         now_dt: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Return the full chronological history as structured data + text."""
+        """Return the full chronological history as structured data + text.
+
+        ``offset`` pages through the timeline. It exists so the mandatory
+        exhaustive-search fallback can hand each of five sub-agents one 20% slice
+        of the store instead of every agent reading (or missing) the whole thing.
+        """
         now_dt = now_dt or datetime.now(timezone.utc)
         cutoff = parse_timeframe(timeframe, now_dt.timestamp())
         hints = [h.strip() for h in (scope_hint or []) if h and h.strip()]
+        offset = max(0, int(offset or 0))
 
         wants_all = int(limit or 0) <= 0
-        # Fetch one extra row so "there is more" can be reported honestly.
-        fetch_limit = None if wants_all else int(limit) + 1
-
-        nodes = storage.get_chronological(
-            include_superseded=include_superseded or include_retracted,
-            include_retracted=include_retracted,
-            memory_type=memory_type,
-            since=cutoff,
-            limit=fetch_limit,
-        )
+        page_size = None if wants_all else max(1, int(limit))
 
         project_root = None
         try:
@@ -89,21 +87,45 @@ class ChronicleEngine:
             project_root = None
 
         if hints:
-            # Same filter as every other read surface: a scoped chronicle cannot
-            # contain another subsystem's history.
-            nodes = [
-                node for node in nodes
+            # Scope is a path-aware filter applied in Python, so paging must load
+            # the filtered set before slicing; otherwise OFFSET would count rows
+            # that the scope later discards.
+            all_nodes = storage.get_chronological(
+                include_superseded=include_superseded or include_retracted,
+                include_retracted=include_retracted,
+                memory_type=memory_type,
+                since=cutoff,
+            )
+            all_nodes = [
+                node for node in all_nodes
                 if node_matches_scope(node.scope or [], hints, project_root=project_root)
             ]
+            total = len(all_nodes)
+            page = all_nodes[offset:] if page_size is None else all_nodes[offset:offset + page_size]
+        else:
+            total = storage.count_chronological(
+                include_superseded=include_superseded or include_retracted,
+                include_retracted=include_retracted,
+                memory_type=memory_type,
+                since=cutoff,
+            )
+            # Fetch one extra row so "there is more" can be reported honestly.
+            fetch_limit = None if page_size is None else page_size + 1
+            nodes = storage.get_chronological(
+                include_superseded=include_superseded or include_retracted,
+                include_retracted=include_retracted,
+                memory_type=memory_type,
+                since=cutoff,
+                limit=fetch_limit,
+                offset=offset,
+            )
+            page = nodes[:page_size] if page_size is not None else nodes
 
-        truncated = False
-        if not wants_all and len(nodes) > int(limit):
-            nodes = nodes[: int(limit)]
-            truncated = True
+        truncated = (offset + len(page)) < total
 
         entries = [
-            ChronicleEntry(index=index, node=node, parents=list(node.parents or []))
-            for index, node in enumerate(nodes, start=1)
+            ChronicleEntry(index=offset + index, node=node, parents=list(node.parents or []))
+            for index, node in enumerate(page, start=1)
         ]
 
         formatted = cls.render(
@@ -116,10 +138,14 @@ class ChronicleEngine:
             timeframe=timeframe,
             include_superseded=include_superseded,
             include_retracted=include_retracted,
+            offset=offset,
+            total=total,
         )
 
         return {
             "count": len(entries),
+            "total": total,
+            "offset": offset,
             "truncated": truncated,
             "first": entries[0].node.timestamp if entries else None,
             "last": entries[-1].node.timestamp if entries else None,
@@ -160,6 +186,8 @@ class ChronicleEngine:
         timeframe: Optional[str] = None,
         include_superseded: bool = True,
         include_retracted: bool = False,
+        offset: int = 0,
+        total: Optional[int] = None,
     ) -> str:
         filters: List[str] = []
         if memory_type:
@@ -173,6 +201,13 @@ class ChronicleEngine:
         filter_text = f" · {' · '.join(filters)}" if filters else ""
 
         if not entries:
+            if offset and total:
+                return (
+                    "════ TACIT CHRONICLE ════\n\n"
+                    f"(Offset {offset} is past the end: this timeline has {total} "
+                    "memories. Use a smaller offset.)\n"
+                    "════════════════════════"
+                )
             return (
                 "════ TACIT CHRONICLE ════\n\n"
                 "(No memories recorded"
@@ -184,9 +219,12 @@ class ChronicleEngine:
 
         first = entries[0].when.strftime("%Y-%m-%d")
         last = entries[-1].when.strftime("%Y-%m-%d")
+        page_text = f" · showing {offset + 1}-{offset + len(entries)}"
+        if total is not None:
+            page_text += f" of {total}"
         header = (
             f"════ TACIT CHRONICLE · {len(entries)} memories · {first} → {last}"
-            f"{filter_text} ════"
+            f"{page_text}{filter_text} ════"
         )
         if scope:
             header += f"\n(scope filter: {', '.join(scope)})"
@@ -208,8 +246,15 @@ class ChronicleEngine:
 
         lines.append("════════════════════════")
         if truncated:
+            remaining = (total - (offset + len(entries))) if total is not None else None
+            if remaining is not None:
+                lines.append(
+                    f"… {remaining} more memories follow after offset "
+                    f"{offset + len(entries)}; this is one chunk, not the whole timeline."
+                )
             lines.append(
-                "… timeline truncated. Raise `limit` (0 = everything) to continue."
+                "… timeline truncated. Raise `limit` (0 = everything) or pass a "
+                "larger `offset` (and the same limit) to continue."
             )
         return "\n".join(lines)
 

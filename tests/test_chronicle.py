@@ -151,6 +151,37 @@ def test_limit_zero_returns_everything(storage):
     assert res["truncated"] is False
 
 
+def test_offset_pages_the_timeline_in_chunks(storage):
+    """The exhaustive-search fallback gives each sub-agent an offset + limit."""
+    for index in range(5):
+        _add(storage, f"Memory {index}", ["backend"], days_ago=100 - index * 10)
+
+    first = ChronicleEngine.build(storage, limit=2)
+    second = ChronicleEngine.build(storage, limit=2, offset=2)
+
+    assert first["total"] == 5
+    assert first["offset"] == 0
+    assert first["truncated"] is True
+    assert [entry["title"] for entry in first["entries"]] == ["Memory 0", "Memory 1"]
+
+    assert second["total"] == 5
+    assert second["offset"] == 2
+    assert second["truncated"] is True
+    assert [entry["title"] for entry in second["entries"]] == ["Memory 2", "Memory 3"]
+    # Indices keep their absolute position in the timeline.
+    assert [entry["index"] for entry in second["entries"]] == [3, 4]
+
+
+def test_offset_past_the_end_is_explained(storage):
+    _add(storage, "Only memory", ["backend"], days_ago=1)
+
+    res = ChronicleEngine.build(storage, limit=2, offset=10)
+
+    assert res["count"] == 0
+    assert res["total"] == 1
+    assert "past the end" in res["formatted"]
+
+
 def test_full_entries_carry_content_and_lineage(storage):
     parent = _add(storage, "Foundational decision", ["backend"], days_ago=50)
     child = MemoryNode(

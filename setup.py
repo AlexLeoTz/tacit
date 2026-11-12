@@ -30,7 +30,6 @@ setup(
         "numpy>=1.24.0",
     ],
     extras_require={
-        "local": ["fastembed>=0.4.0"],
         "dev": ["pytest>=7.0.0", "PyYAML>=6.0"],
         # `tacit install-mcp --client deepseek-harness` rewrites the dsh
         # profile patch layer; PyYAML keeps that round-trip lossless.

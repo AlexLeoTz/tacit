@@ -1,17 +1,26 @@
-"""Embedding service: pluggable providers with a strict, single-provider contract.
+"""Embedding service: a hosted, single-provider contract built around Gemini.
 
 Provider chain, resolved once per process:
 
-1. **OpenAI** (``OPENAI_API_KEY``) — ``text-embedding-3-small``, 1536 dims.
-2. **Gemini** (``GEMINI_API_KEY``) — ``gemini-embedding-001``, 768 dims.
-3. **Local ONNX** (``fastembed``) — ``BAAI/bge-small-en-v1.5``, 384 dims, offline
-   and zero-config. This stays as the fallback so Tacit keeps working without a
-   network or a paid key.
+1. **Gemini** (``GEMINI_API_KEY``) — ``gemini-embedding-001``, 768 dims by
+   default. This is the default engine: it is dramatically more accurate than a
+   tiny offline ONNX model, and it is what makes conceptual search work across
+   titles, summaries and tags.
+2. **OpenAI** (``OPENAI_API_KEY``) — ``text-embedding-3-small``, 1536 dims. Kept
+   as an optional alternative for shops that already standardised on OpenAI. Set
+   ``TACIT_EMBED_PROVIDER=openai`` when both keys exist and OpenAI should win.
+
+The local ONNX provider was removed deliberately. ``BAAI/bge-small-en-v1.5``
+runs offline, but a 384-dimension model trained on short English passages matched
+Tacit's terse engineering notes unreliably, and a missing/corrupt model cache
+turned search into a multi-second retry storm. Semantic search is now a hosted
+call with an explicit key; when no key is present Tacit still answers with BM25
+keyword search instead of pretending the vector channel exists.
 
 Only *titles, tags and summaries* are embedded, never full content. Vectors from
 different models are not comparable, so the provider is deliberately sticky: a
 network failure does **not** silently fall back to another model mid-project,
-because that would mix 1536-dim and 384-dim vectors in one database. Failures
+because that would mix 768-dim and 1536-dim vectors in one database. Failures
 surface as :class:`EmbeddingUnavailable` and callers degrade to keyword search.
 
 Switching providers is therefore a deliberate act that requires re-embedding:
@@ -25,31 +34,23 @@ import json
 import os
 import random
 import re
-import sys
 import threading
 import time
-from pathlib import Path
 from typing import Optional, Sequence
 import urllib.error
 import urllib.request
 
-#: Local ONNX model (offline fallback).
-LOCAL_MODEL = os.environ.get("TACIT_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
-LOCAL_DIM = 384
-
-#: Google Gemini.
+#: Google Gemini. ``gemini-embedding-001`` outputs 3072 dimensions by default;
+#: Tacit asks for 768 explicitly (Google's recommended size for storage/quality)
+#: and normalises the truncated vector itself, as that model requires.
 GEMINI_MODEL = os.environ.get("TACIT_GEMINI_MODEL", "gemini-embedding-001")
 GEMINI_DIM = 768
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents"
 
-#: OpenAI.
+#: OpenAI (optional alternative; Gemini wins when both keys are present).
 OPENAI_MODEL = os.environ.get("TACIT_OPENAI_EMBED_MODEL", "text-embedding-3-small")
 OPENAI_DIM = 1536
 OPENAI_ENDPOINT = "https://api.openai.com/v1/embeddings"
-
-#: bge-family models expect this prefix on queries only.
-QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
-BATCH_SIZE = 64
-REQUEST_TIMEOUT = 20.0
 
 #: Items sent per remote request. Google counts every item against the embedding
 #: quota, so a single 55-item batch is what produced `HTTP 429 Too Many Requests`
@@ -68,11 +69,10 @@ MAX_RETRIES = int(os.environ.get("TACIT_EMBED_MAX_RETRIES", "4"))
 BACKOFF_BASE = 2.0
 BACKOFF_MAX = 30.0
 
+REQUEST_TIMEOUT = 20.0
+
 #: Anything that looks like an API key, stripped from messages we surface.
 _KEY_PATTERN = re.compile(r"(AIza[0-9A-Za-z_\-]{10,}|sk-[0-9A-Za-z_\-]{10,}|Bearer\s+\S+)")
-
-#: Backwards-compatible alias for callers that referenced the old constant.
-EMBED_DIM = LOCAL_DIM
 
 
 def _openai_model() -> str:
@@ -84,69 +84,23 @@ def _gemini_model() -> str:
     return os.environ.get("TACIT_GEMINI_MODEL", GEMINI_MODEL)
 
 
-def _local_model() -> str:
-    return os.environ.get("TACIT_EMBED_MODEL", LOCAL_MODEL)
+def gemini_dim() -> int:
+    """Output width requested from Gemini, or ``0`` for the model's native width.
 
-
-def user_cache_dir() -> Path:
-    """Persistent per-user cache location for downloaded models."""
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or os.path.join(Path.home(), "AppData", "Local")
-        return Path(base) / "tacit" / "models"
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tacit" / "models"
-
-
-def _is_writable_dir(path: Path) -> bool:
-    """True when we can actually create files in ``path``."""
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".tacit_write_probe"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink()
-        return True
-    except OSError:
-        return False
-
-
-def resolve_cache_dir(project_root: Optional[Path] = None) -> Path:
-    """Pick a persistent, writable directory for the ONNX model.
-
-    fastembed's own default is the OS temp directory, which is a poor choice for
-    a ~50 MB download: it can vanish between runs, and sandboxes frequently deny
-    writes there — the failure surfaced as a multi-second retry storm ending in
-    ``Permission denied`` and a search timeout.
-
-    Order: explicit override, then the per-user cache, then ``.tacit/models``
-    inside the project (the only location guaranteed writable inside a
-    workspace-restricted sandbox).
+    ``gemini-embedding-001`` natively emits 3072 dimensions; asking for 768 keeps
+    the store small and matches Google's recommended storage/quality trade-off.
+    Legacy models (``text-embedding-004``) reject the field, so it is only sent
+    when explicitly configured or when the model is one of the MRL embedding
+    models.
     """
-    override = os.environ.get("TACIT_EMBED_CACHE") or os.environ.get("FASTEMBED_CACHE_PATH")
-    if override:
-        candidate = Path(override).expanduser()
-        if _is_writable_dir(candidate):
-            return candidate
-        return candidate
-
-    from ..utils.config import Config
-
-    if project_root is None:
+    raw = os.environ.get("TACIT_GEMINI_DIM", "").strip()
+    if raw:
         try:
-            project_root = Config.find_project_root()
-        except Exception:
-            project_root = None
-
-    candidates = [user_cache_dir()]
-    if project_root is not None:
-        try:
-            # Follows a relocated store, so `tacit move` carries the model too.
-            candidates.append(Config.get_memory_dir(project_root) / "models")
-        except Exception:
-            candidates.append(Path(project_root) / ".tacit" / "models")
-
-    for candidate in candidates:
-        if _is_writable_dir(candidate):
-            return candidate
-    return candidates[-1]
+            value = int(raw)
+        except ValueError:
+            return GEMINI_DIM
+        return value if 1 <= value <= 3072 else GEMINI_DIM
+    return GEMINI_DIM if _gemini_model().startswith("gemini-embedding") else 0
 
 
 class EmbeddingUnavailable(RuntimeError):
@@ -233,7 +187,7 @@ def remediation_hint(provider: str, detail: str) -> str:
     lowered = detail.lower()
 
     if any(marker in lowered for marker in _AUTH_MARKERS):
-        variable = "GEMINI_API_KEY" if provider == "Gemini" else "OPENAI_API_KEY"
+        variable = "OPENAI_API_KEY" if provider == "OpenAI" else "GEMINI_API_KEY"
         return (
             f"\nHint: the provider rejected the credential Tacit sent. Check that {variable} is set "
             "in THIS shell (a revoked or stale key may still be exported), that the key is still "
@@ -256,16 +210,20 @@ class EmbeddingService:
     _instance: Optional["EmbeddingService"] = None
     _lock = threading.Lock()
 
-    def __init__(self, project_root: Optional[Path] = None) -> None:
-        self._model = None
-        self._failed = False
-        self._load_lock = threading.Lock()
-        self._cache_dir: Optional[Path] = None
-        self._last_error = ""
+    def __init__(self, project_root=None) -> None:
+        # ``project_root`` is accepted for backwards compatibility; hosted
+        # providers do not need a model cache inside the project.
         self._project_root = project_root
+        self._failed = False
+        self._last_error = ""
         self._last_request_at: Optional[float] = None
         self._openai_api_key = os.environ.get("OPENAI_API_KEY")
         self._gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        self._observed_dim = 0
+        #: Resolved once. Vectors from different models are not comparable, so a
+        #: key appearing/disappearing mid-session must never move a project onto
+        #: another embedding space; `reset()` is the deliberate switch.
+        self._resolved_provider: Optional[str] = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -291,39 +249,38 @@ class EmbeddingService:
         return os.environ.get("GEMINI_API_KEY") or self._gemini_api_key
 
     def _resolve_provider(self, allow_download: bool = False) -> str:
-        """Resolve the provider: OpenAI, then Gemini, then local ONNX.
+        """Resolve the provider: Gemini by default, OpenAI as an opt-in alternative.
 
-        ``allow_download=False`` (the default, used by every read path) only
-        accepts a model that is already on disk. A search query must never block
-        on a 50 MB download: fetching a model is an explicit action, performed by
-        ``tacit reindex``.
+        ``allow_download`` is accepted for API compatibility with older callers;
+        there is no local model left to download.
         """
-        if self._openai_key():
-            return "openai"
-        if self._gemini_key():
-            return "gemini"
-        self._load(allow_download=allow_download)
-        return "local" if self._model is not None else "none"
+        if self._resolved_provider is not None:
+            return self._resolved_provider
+        explicit = os.environ.get("TACIT_EMBED_PROVIDER", "").strip().lower()
+        if explicit == "openai" and self._openai_key():
+            provider = "openai"
+        elif self._gemini_key():
+            provider = "gemini"
+        elif self._openai_key():
+            provider = "openai"
+        else:
+            provider = "none"
+        self._resolved_provider = provider
+        return provider
 
     @property
     def provider(self) -> str:
-        """One of ``openai``, ``gemini``, ``local`` or ``none``."""
+        """One of ``gemini``, ``openai`` or ``none``."""
         return self._resolve_provider()
 
     @property
     def available(self) -> bool:
-        """True when a provider can serve a query *right now*, without downloading."""
+        """True when a provider can serve a query right now."""
         return self._resolve_provider() != "none"
 
     @property
-    def cache_dir(self) -> Path:
-        if self._cache_dir is None:
-            self._cache_dir = resolve_cache_dir(self._project_root)
-        return self._cache_dir
-
-    @property
     def last_error(self) -> str:
-        """Why the local model could not be used, for user-facing messages."""
+        """Why the last remote call failed, for user-facing messages."""
         return self._last_error
 
     def key_hint(self) -> str:
@@ -333,7 +290,13 @@ class EmbeddingService:
         usual cause of a rejected key is a revoked one still exported in the
         shell that launched the command.
         """
-        key = self._openai_key() or self._gemini_key()
+        provider = self._resolve_provider()
+        if provider == "gemini":
+            key = self._gemini_key()
+        elif provider == "openai":
+            key = self._openai_key()
+        else:
+            key = self._gemini_key() or self._openai_key()
         if not key:
             return "none"
         if len(key) <= 12:
@@ -343,9 +306,12 @@ class EmbeddingService:
     @property
     def dimension(self) -> int:
         """Vector width of the resolved provider (0 when unavailable)."""
-        return {"openai": OPENAI_DIM, "gemini": GEMINI_DIM, "local": LOCAL_DIM}.get(
-            self._resolve_provider(), 0
-        )
+        provider = self._resolve_provider()
+        if provider == "gemini":
+            return gemini_dim() or self._observed_dim or 768
+        if provider == "openai":
+            return OPENAI_DIM
+        return 0
 
     @property
     def model_id(self) -> str:
@@ -353,7 +319,6 @@ class EmbeddingService:
         return {
             "openai": _openai_model(),
             "gemini": _gemini_model(),
-            "local": _local_model(),
         }.get(self._resolve_provider(), "none")
 
     def describe(self) -> str:
@@ -361,21 +326,10 @@ class EmbeddingService:
         if provider == "none":
             detail = f" ({self._last_error})" if self._last_error else ""
             return (
-                "unavailable (no OPENAI_API_KEY, no GEMINI_API_KEY, and no local ONNX "
-                f"model cached in {self.cache_dir}){detail}"
+                "unavailable (GEMINI_API_KEY is not set, and no OPENAI_API_KEY was found)"
+                f"{detail}"
             )
         return f"{provider}:{self.model_id} ({self.dimension}d)"
-
-    def ensure_local_model(self, allow_download: bool = True) -> bool:
-        """Prepare the local ONNX model, downloading it if permitted.
-
-        Only called from explicit maintenance commands (``tacit reindex``), never
-        from a query.
-        """
-        if self._openai_key() or self._gemini_key():
-            return False
-        self._load(allow_download=allow_download)
-        return self._model is not None
 
     # -- remote providers --------------------------------------------------
 
@@ -507,7 +461,12 @@ class EmbeddingService:
     def _embed_gemini(
         self, texts: Sequence[str], is_query: bool = False, *, pace: bool = True
     ) -> list[list[float]]:
-        """Embed via the Gemini REST API, in paced batches."""
+        """Embed via the Gemini REST API, in paced batches.
+
+        Gemini's embedding models are asymmetric: ``RETRIEVAL_DOCUMENT`` for the
+        stored title/tags/summary text, ``RETRIEVAL_QUERY`` for the search query.
+        Sending the wrong task type costs recall, so the two paths are explicit.
+        """
         api_key = self._gemini_key()
         if not api_key:
             raise EmbeddingUnavailable("GEMINI_API_KEY is not set")
@@ -515,28 +474,31 @@ class EmbeddingService:
         model = _gemini_model()
         # The key travels in a header, never the URL: query strings end up in
         # logs, proxies and tracebacks, which is how it escaped last time.
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model}:batchEmbedContents"
-        )
+        url = GEMINI_ENDPOINT.format(model=model)
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         task_type = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
+        output_dim = gemini_dim()
 
         vectors: list[list[float]] = []
         for start in range(0, len(texts), max(1, REMOTE_BATCH_SIZE)):
             chunk = list(texts[start:start + max(1, REMOTE_BATCH_SIZE)])
+            requests = []
+            for text in chunk:
+                item = {
+                    "model": f"models/{model}",
+                    "content": {"parts": [{"text": text}]},
+                }
+                # gemini-embedding-2 does not accept taskType; the default model
+                # (gemini-embedding-001) does and benefits from it.
+                if not model.startswith("gemini-embedding-2"):
+                    item["taskType"] = task_type
+                if output_dim:
+                    item["outputDimensionality"] = output_dim
+                requests.append(item)
+
             body = self._request_json(
                 url,
-                {
-                    "requests": [
-                        {
-                            "model": f"models/{model}",
-                            "content": {"parts": [{"text": text}]},
-                            "taskType": task_type,
-                        }
-                        for text in chunk
-                    ]
-                },
+                {"requests": requests},
                 headers,
                 pace=pace,
                 provider="Gemini",
@@ -544,55 +506,20 @@ class EmbeddingService:
             chunk_vectors = [item.get("values") for item in body.get("embeddings", [])]
             if len(chunk_vectors) != len(chunk) or any(v is None for v in chunk_vectors):
                 raise EmbeddingUnavailable("Gemini returned an unexpected number of embeddings")
+
+            expected = self.dimension
+            for values in chunk_vectors:
+                if values:
+                    self._observed_dim = len(values)
+            if expected and any(len(v) != expected for v in chunk_vectors):
+                actual = len(chunk_vectors[0])
+                raise EmbeddingUnavailable(
+                    f"Gemini returned {actual}-dimension vectors but Tacit expected {expected}. "
+                    "Set TACIT_GEMINI_DIM to the width you want (768, 1536 or 3072) and run "
+                    "`tacit reindex --force`, or use TACIT_GEMINI_MODEL=text-embedding-004."
+                )
             vectors.extend(chunk_vectors)
         return vectors
-
-    # -- local provider ----------------------------------------------------
-
-    def _load(self, allow_download: bool = False) -> None:
-        """Load the local ONNX model, optionally downloading it.
-
-        ``local_files_only=True`` when downloads are not allowed makes a missing
-        model fail in milliseconds instead of retrying the download three times
-        with backoff — the retry storm that made `tacit search` appear to hang.
-        """
-        if self._model is not None:
-            return
-        if self._failed and not allow_download:
-            return
-        with self._load_lock:
-            if self._model is not None:
-                return
-            if self._failed and not allow_download:
-                return
-            try:
-                from fastembed import TextEmbedding
-
-                self._model = TextEmbedding(
-                    _local_model(),
-                    cache_dir=str(self.cache_dir),
-                    local_files_only=not allow_download,
-                )
-                self._failed = False
-                self._last_error = ""
-            except Exception as exc:
-                self._failed = True
-                self._last_error = redact(f"{type(exc).__name__}: {exc}"[:200])
-
-    def _embed_local(self, texts: Sequence[str]) -> list[list[float]]:
-        self._load()
-        if self._model is None:
-            raise EmbeddingUnavailable(
-                f"local ONNX embedding model is not available in {self.cache_dir}"
-                + (f" ({self._last_error})" if self._last_error else "")
-                + "\nHint: download it with `tacit reindex`, install it with `pip install fastembed`,"
-                " or set OPENAI_API_KEY / GEMINI_API_KEY to use a hosted provider instead."
-            )
-        out: list[list[float]] = []
-        for start in range(0, len(texts), BATCH_SIZE):
-            batch = texts[start:start + BATCH_SIZE]
-            out.extend(vector.tolist() for vector in self._model.embed(batch))
-        return out
 
     # -- public API --------------------------------------------------------
 
@@ -601,17 +528,15 @@ class EmbeddingService:
         if not texts:
             return []
         provider = self._resolve_provider()
-        if provider == "openai":
-            return self._embed_openai(texts)
         if provider == "gemini":
             return self._embed_gemini(texts, is_query=False)
-        if provider == "local":
-            return self._embed_local(texts)
+        if provider == "openai":
+            return self._embed_openai(texts)
         raise EmbeddingUnavailable(
             "no embedding provider configured.\n"
-            "Hint: set OPENAI_API_KEY (text-embedding-3-small) or GEMINI_API_KEY "
-            "(gemini-embedding-001), or install the offline model with "
-            "`pip install fastembed` and download it via `tacit reindex`."
+            "Hint: set GEMINI_API_KEY to use Google Gemini (gemini-embedding-001), "
+            "or OPENAI_API_KEY for the optional OpenAI provider. Without a key, "
+            "Tacit still works, but search is keyword-only (BM25)."
         )
 
     def embed_query(self, text: str) -> list[float]:
@@ -621,11 +546,8 @@ class EmbeddingService:
         2-second bulk interval. Retries still apply if the API rate-limits it.
         """
         provider = self._resolve_provider()
-        if provider == "openai":
-            return self._embed_openai([text], pace=False)[0]
         if provider == "gemini":
             return self._embed_gemini([text], is_query=True, pace=False)[0]
-        if provider == "local":
-            # Asymmetric retrieval: only the query side takes the bge prefix.
-            return self._embed_local([QUERY_PREFIX + text])[0]
+        if provider == "openai":
+            return self._embed_openai([text], pace=False)[0]
         raise EmbeddingUnavailable("no embedding provider configured")

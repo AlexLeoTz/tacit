@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -17,6 +18,12 @@ from ..utils.scope import node_matches_scope
 RRF_K = 60
 RETRIEVE_K = 50
 RECENCY_HALF_LIFE_DAYS = 90
+
+#: Minimum cosine similarity for a vector hit. Too high silently drops related
+#: memories (Gemini document/query pairs often land around 0.5-0.7), which is the
+#: class of false negative that made search feel unreliable. RRF and the authority
+#: multiplier below still order whatever survives.
+MIN_SIMILARITY = float(os.environ.get("TACIT_VECTOR_MIN_SIMILARITY", "0.30"))
 
 #: How much authority may swing a result, as a multiplier floor. Scores are
 #: ``relevance * (AUTHORITY_FLOOR + (1 - AUTHORITY_FLOOR) * authority)``, so a
@@ -75,6 +82,34 @@ def clean_query(q: str) -> str:
     return q
 
 
+def _fts_terms(query: str) -> List[str]:
+    """Split a natural-language query into FTS5 prefix terms.
+
+    The previous implementation appended ``*`` to the *whole* query, which FTS5
+    reads as an implicit AND: "why did we choose async db sessions" became
+    ``choose async db sessions*`` and matched nothing. OR-ing the individual
+    terms gives BM25 the chance to rank the documents that match most terms,
+    instead of returning an empty answer as soon as one word is absent.
+    """
+    terms: List[str] = []
+    seen = set()
+    for raw in query.split():
+        cleaned = "".join(ch for ch in raw if ch.isalnum())
+        if len(cleaned) < 2:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        terms.append(cleaned)
+    return terms
+
+
+def _like_pattern(term: str) -> str:
+    escaped = term.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    return f"%{escaped}%"
+
+
 def bm25_search(
     conn,
     query: str,
@@ -87,11 +122,10 @@ def bm25_search(
     if not query.strip():
         return []
 
-    # Clean and sanitize tokens for FTS5 syntax
-    sanitized = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
-    if not sanitized:
+    terms = _fts_terms(query)
+    if not terms:
         return []
-    fts_query = f"{sanitized}*"
+    fts_query = " OR ".join(f"{term}*" for term in terms)
 
     status_condition = "status IN ('active', 'superseded')" if include_superseded else "status = 'active'"
 
@@ -101,6 +135,15 @@ def bm25_search(
     if type_filter:
         conditions.append("m.type = ?")
         params.append(type_filter)
+
+    if tags:
+        # Tags usually live on the stored row but were never filtered here, so
+        # `memory_search(tags=[...])` silently returned untagged memories.
+        for tag in tags:
+            tag = str(tag).strip()
+            if tag:
+                conditions.append("m.tags LIKE ? ESCAPE '!'")
+                params.append(_like_pattern(tag))
 
     where_clause = " AND ".join(conditions)
     params.append(k)
@@ -114,18 +157,48 @@ def bm25_search(
     """
     try:
         rows = conn.execute(sql, params).fetchall()
+        if rows:
+            return [str(r[0]) for r in rows]
+    except Exception:
+        # Fall through to the LIKE path: FTS syntax errors and unusual symbols
+        # must not turn a search into an empty result.
+        pass
+
+    # Fallback LIKE search: OR the terms rather than requiring the full phrase,
+    # so partial symbols such as "WinError 32" still find their memory.
+    like_clauses = []
+    like_params: List[Any] = []
+    for term in terms:
+        like_clauses.append(
+            "(content LIKE ? ESCAPE '!' OR summary LIKE ? ESCAPE '!' "
+            "OR title LIKE ? ESCAPE '!' OR tags LIKE ? ESCAPE '!')"
+        )
+        pattern = _like_pattern(term)
+        like_params.extend([pattern, pattern, pattern, pattern])
+
+    fallback_conditions = [f"({ ' OR '.join(like_clauses) })", status_condition]
+    fallback_params = list(like_params)
+    if type_filter:
+        fallback_conditions.append("type = ?")
+        fallback_params.append(type_filter)
+    if tags:
+        for tag in tags:
+            tag = str(tag).strip()
+            if tag:
+                fallback_conditions.append("tags LIKE ? ESCAPE '!'")
+                fallback_params.append(_like_pattern(tag))
+    fallback_params.append(k)
+
+    fallback_sql = f"""
+        SELECT id FROM memories
+        WHERE {' AND '.join(fallback_conditions)}
+        ORDER BY timestamp DESC LIMIT ?
+    """
+    try:
+        rows = conn.execute(fallback_sql, fallback_params).fetchall()
         return [str(r[0]) for r in rows]
     except Exception:
-        # Fallback LIKE search if FTS table uninitialized or matches syntax error
-        like_term = f"%{query}%"
-        fallback_sql = f"""
-            SELECT id FROM memories
-            WHERE (content LIKE ? OR summary LIKE ? OR title LIKE ? OR tags LIKE ?)
-              AND {status_condition}
-            ORDER BY timestamp DESC LIMIT ?
-        """
-        rows = conn.execute(fallback_sql, (like_term, like_term, like_term, like_term, k)).fetchall()
-        return [str(r[0]) for r in rows]
+        return []
 
 
 def vector_search(
@@ -133,10 +206,18 @@ def vector_search(
     query_vec: List[float],
     k: int = RETRIEVE_K,
     type_filter: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     include_superseded: bool = False,
 ) -> List[str]:
     """Channel B: Dense embedding vector similarity search with numpy fallback."""
-    return _numpy_bruteforce(conn, query_vec, k=k, type_filter=type_filter, include_superseded=include_superseded)
+    return _numpy_bruteforce(
+        conn,
+        query_vec,
+        k=k,
+        type_filter=type_filter,
+        tags=tags,
+        include_superseded=include_superseded,
+    )
 
 
 def _numpy_bruteforce(
@@ -144,6 +225,7 @@ def _numpy_bruteforce(
     query_vec: List[float],
     k: int = RETRIEVE_K,
     type_filter: Optional[str] = None,
+    tags: Optional[List[str]] = None,
     include_superseded: bool = False,
 ) -> List[str]:
     """Brute-force dot-product similarity over L2-normalized float32 BLOB vectors."""
@@ -159,6 +241,13 @@ def _numpy_bruteforce(
     if type_filter:
         conditions.append("type = ?")
         params.append(type_filter)
+
+    if tags:
+        for tag in tags:
+            tag = str(tag).strip()
+            if tag:
+                conditions.append("tags LIKE ? ESCAPE '!'")
+                params.append(_like_pattern(tag))
 
     where_clause = " AND ".join(conditions)
     sql = f"SELECT id, embedding FROM memories WHERE {where_clause}"
@@ -189,8 +278,11 @@ def _numpy_bruteforce(
         # Cosine similarity equals dot product for L2-normalized vectors
         sims = mat @ q
         sorted_indices = np.argsort(-sims)
-        # Filter by minimum similarity threshold to avoid noise in small or disjoint corpora
-        matched_indices = [int(i) for i in sorted_indices if float(sims[i]) >= 0.52][:k]
+        # Filter by a configurable minimum similarity. The old 0.52 floor was
+        # tuned for a 384-dim local model; Gemini pairs frequently score below it
+        # while still being the right memory, which turned semantic search into a
+        # silent no-op on real data.
+        matched_indices = [int(i) for i in sorted_indices if float(sims[i]) >= MIN_SIMILARITY][:k]
         return [node_ids[i] for i in matched_indices]
     except Exception:
         return []
@@ -305,7 +397,7 @@ def apply_boosts(
 
 
 class HybridSearchEngine:
-    """Coordinates BM25, ONNX dense vector retrieval, and RRF fusion."""
+    """Coordinates BM25, dense vector retrieval, and RRF fusion."""
 
     @classmethod
     def search(
@@ -320,10 +412,30 @@ class HybridSearchEngine:
         include_superseded: bool = False,
         now_dt: Optional[datetime] = None,
         debug: bool = False,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Perform hybrid search returning ranked node dictionaries."""
+        """Perform hybrid search returning ranked node dictionaries.
+
+        ``diagnostics`` is filled in place (when supplied) with which channel ran
+        and why. The MCP layer uses it to turn an empty answer into an actionable
+        one — "the vector channel was unavailable" is very different from "this
+        store genuinely has no matching memory".
+        """
         q = clean_query(query)
         now_ts = (now_dt or datetime.now(timezone.utc)).timestamp()
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update(
+                {
+                    "query": q,
+                    "mode": mode,
+                    "bm25_hits": 0,
+                    "vector_hits": 0,
+                    "vector_used": False,
+                    "vector_error": "",
+                    "embedding_provider": "none",
+                }
+            )
 
         # Handle empty/degenerate query
         if not q:
@@ -349,6 +461,8 @@ class HybridSearchEngine:
 
         embed_svc = EmbeddingService.get()
         use_vectors = (mode == "hybrid" and embed_svc.available)
+        if diagnostics is not None:
+            diagnostics["embedding_provider"] = embed_svc.provider
 
         bm25_ranked = bm25_search(
             conn=conn,
@@ -358,6 +472,8 @@ class HybridSearchEngine:
             tags=tags,
             include_superseded=include_superseded,
         )
+        if diagnostics is not None:
+            diagnostics["bm25_hits"] = len(bm25_ranked)
 
         vec_ranked: List[str] = []
         if use_vectors:
@@ -369,10 +485,16 @@ class HybridSearchEngine:
                     query_vec=norm_qvec,
                     k=RETRIEVE_K,
                     type_filter=type_filter,
+                    tags=tags,
                     include_superseded=include_superseded,
                 )
-            except Exception:
+                if diagnostics is not None:
+                    diagnostics["vector_used"] = True
+                    diagnostics["vector_hits"] = len(vec_ranked)
+            except Exception as exc:
                 vec_ranked = []
+                if diagnostics is not None:
+                    diagnostics["vector_error"] = f"{type(exc).__name__}: {exc}"[:500]
 
         rankings = [bm25_ranked]
         if vec_ranked:
